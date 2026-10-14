@@ -1,6 +1,11 @@
 import "server-only";
 import type { PublicConnection } from "./connections";
-import type { ScheduleChanges, ScheduleRow, ScheduleStore } from "./schedules";
+import type {
+  ScheduleChanges,
+  ScheduleRow,
+  ScheduleStore,
+  SendHistoryRow,
+} from "./schedules";
 
 const scheduleFields = [
   "id",
@@ -40,6 +45,13 @@ const updateFields = [
   "next_send_at",
   "updated_at",
 ] as const;
+const historyFields = [
+  "id",
+  "scheduled_for",
+  "attempted_at",
+  "status",
+  "error_code",
+] as const;
 
 export class ScheduleStorageError extends Error {
   constructor(readonly status: number) {
@@ -56,7 +68,7 @@ export function createScheduleStore(config: {
   const fetcher = config.fetcher ?? fetch;
 
   async function request(
-    table: "schedules" | "gmail_connections",
+    table: "schedules" | "gmail_connections" | "send_log",
     params: Record<string, string>,
     method: "GET" | "POST" | "PATCH" | "DELETE",
     accessToken: string,
@@ -193,6 +205,31 @@ export function createScheduleStore(config: {
       return Object.fromEntries(
         connectionFields.map((field) => [field, rows[0][field]]),
       ) as unknown as PublicConnection;
+    },
+    async history(userId, scheduleId, accessToken) {
+      const rows = await request(
+        "send_log",
+        {
+          user_id: `eq.${userId}`,
+          schedule_id: `eq.${scheduleId}`,
+          select: historyFields.join(","),
+          order: "attempted_at.desc,id.asc",
+        },
+        "GET",
+        accessToken,
+      );
+      return rows.map((row) => {
+        if (
+          row.status !== "sent" &&
+          row.status !== "failed" &&
+          row.status !== "deferred" &&
+          row.status !== "skipped"
+        )
+          throw new ScheduleStorageError(502);
+        return Object.fromEntries(
+          historyFields.map((field) => [field, row[field]]),
+        ) as unknown as SendHistoryRow;
+      });
     },
   };
 }

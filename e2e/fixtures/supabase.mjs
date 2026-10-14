@@ -112,6 +112,7 @@ function newScenario() {
       newSchedule(owner, "paused"),
       newSchedule(connected),
     ],
+    sendLogs: [],
     revokedTokens: [],
     exchanges: [],
     deletedUserIds: new Set(),
@@ -196,6 +197,26 @@ createServer(async (req, res) => {
         );
         return reply(200, { user_id: scenario.connected.id });
       }
+      if (setup === "send-log" && req.method === "POST") {
+        const input = JSON.parse(await body(req));
+        const schedule = scenario.schedules.find(
+          (row) =>
+            row.id === input.schedule_id &&
+            row.user_id === scenario.connected.id,
+        );
+        if (!schedule || !Array.isArray(input.rows))
+          return reply(400, { error: "invalid history fixture" });
+        scenario.sendLogs = input.rows.map((row) => ({
+          id: randomUUID(),
+          schedule_id: schedule.id,
+          user_id: scenario.connected.id,
+          scheduled_for: row.scheduled_for,
+          attempted_at: row.attempted_at,
+          status: row.status,
+          error_code: row.error_code,
+        }));
+        return reply(200, { rows: scenario.sendLogs.length });
+      }
       if (setup) return reply(404, { error: "unknown test setup" });
       if (req.method === "DELETE") {
         scenarios.delete(id);
@@ -206,6 +227,7 @@ createServer(async (req, res) => {
       return reply(200, {
         connections: [...scenario.connections.values()],
         schedules: scenario.schedules,
+        sendLogs: scenario.sendLogs,
         revokedTokens: scenario.revokedTokens,
         exchanges: scenario.exchanges,
         deletedUserIds: [...scenario.deletedUserIds],
@@ -358,6 +380,9 @@ createServer(async (req, res) => {
       target.scenario.schedules = target.scenario.schedules.filter(
         (schedule) => schedule.user_id !== userId,
       );
+      target.scenario.sendLogs = target.scenario.sendLogs.filter(
+        (row) => row.user_id !== userId,
+      );
       return reply(200, { id: userId });
     }
     if (url.pathname === "/rest/v1/schedules" && !service) {
@@ -495,7 +520,8 @@ createServer(async (req, res) => {
           : [],
       );
     }
-    if (!service) return reply(401, { error: "service role required" });
+    if (!service && url.pathname !== "/rest/v1/send_log")
+      return reply(401, { error: "service role required" });
     if (
       url.pathname === "/rest/v1/gmail_connections" &&
       req.method === "POST"
@@ -526,6 +552,40 @@ createServer(async (req, res) => {
         target.scenario.connections.delete(target.user.id);
         return reply(204);
       }
+    }
+    if (url.pathname === "/rest/v1/send_log" && req.method === "GET") {
+      if (!identity || req.headers.apikey !== "fake-anon-key") {
+        return reply(401, { error: "unauthorized" });
+      }
+      if (url.searchParams.get("user_id") !== `eq.${identity.user.id}`)
+        return reply(403, { error: "caller owner filter required" });
+      const columns = (url.searchParams.get("select") ?? "").split(",");
+      if (
+        columns.join(",") !== "id,scheduled_for,attempted_at,status,error_code"
+      )
+        return reply(400, { error: "send history projection is not allowed" });
+      if (url.searchParams.get("order") !== "attempted_at.desc,id.asc")
+        return reply(400, { error: "send history order is required" });
+      const scheduleId = url.searchParams.get("schedule_id");
+      if (!scheduleId?.startsWith("eq."))
+        return reply(400, { error: "schedule id filter is required" });
+      return reply(
+        200,
+        identity.scenario.sendLogs
+          .filter(
+            (row) =>
+              row.user_id === identity.user.id &&
+              `eq.${row.schedule_id}` === scheduleId,
+          )
+          .sort(
+            (a, b) =>
+              b.attempted_at.localeCompare(a.attempted_at) ||
+              a.id.localeCompare(b.id),
+          )
+          .map((row) =>
+            Object.fromEntries(columns.map((column) => [column, row[column]])),
+          ),
+      );
     }
     if (url.pathname === "/rest/v1/schedules" && req.method === "PATCH") {
       const data = JSON.parse(await body(req));

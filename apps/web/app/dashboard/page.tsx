@@ -101,10 +101,17 @@ export default async function Dashboard({
               ) : (
                 <>
                   {connection?.status === "needs_reconnect" ? (
-                    <p>
-                      Your Gmail permission needs renewing. Connect again to
-                      restore sending access.
-                    </p>
+                    <div className={styles.reconnect} role="alert">
+                      <p>
+                        Your Gmail permission needs renewing. Reconnect Gmail to
+                        send scheduled emails again.
+                      </p>
+                      <form method="post" action="/api/gmail/connect">
+                        <button className={styles.button} type="submit">
+                          Reconnect Gmail
+                        </button>
+                      </form>
+                    </div>
                   ) : null}
                   <p>
                     Connect the same Google account you used to sign in,{" "}

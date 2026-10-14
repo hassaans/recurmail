@@ -31,6 +31,14 @@ export interface ScheduleRow extends ScheduleInput {
   updated_at: string;
 }
 
+export interface SendHistoryRow {
+  id: string;
+  scheduled_for: string;
+  attempted_at: string;
+  status: "sent" | "failed" | "deferred" | "skipped";
+  error_code: string | null;
+}
+
 export type ScheduleChanges = Partial<ScheduleInput> &
   Partial<Pick<ScheduleRow, "status" | "next_send_at" | "updated_at">>;
 
@@ -57,6 +65,11 @@ export interface ScheduleStore {
     userId: string,
     accessToken: string,
   ): Promise<PublicConnection | null>;
+  history(
+    userId: string,
+    scheduleId: string,
+    accessToken: string,
+  ): Promise<SendHistoryRow[]>;
 }
 
 const editableFields = [
@@ -451,5 +464,16 @@ export function createScheduleHandlers(config: {
           paused: await store.pauseAll(identity.user.id, identity.accessToken),
         }),
       ),
+    history: (request: Request, id: string) =>
+      run("history", request, false, async (identity) => {
+        await owned(identity, id);
+        return scheduleJson({
+          history: await store.history(
+            identity.user.id,
+            id,
+            identity.accessToken,
+          ),
+        });
+      }),
   };
 }
