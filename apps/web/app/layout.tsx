@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://recurmail.com"),
   title: "RecurMail",
   description: "A workspace for the RecurMail web app.",
 };
