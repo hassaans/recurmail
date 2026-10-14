@@ -58,12 +58,6 @@ select throws_ok(
 );
 update public.schedules set subject = 'overwritten by A'
 where id = '10000000-0000-4000-8000-000000000002';
-select is(
-  (with deleted as (delete from public.schedules
-    where id = '10000000-0000-4000-8000-000000000001' returning id)
-   select count(*) from deleted),
-  1::bigint, 'user A can delete their own schedule'
-);
 reset role;
 select is(
   (select subject from public.schedules where id = '10000000-0000-4000-8000-000000000002'),
@@ -71,6 +65,14 @@ select is(
 );
 set local role service_role;
 select is((select count(*) from public.schedules), 2::bigint, 'service role can read schedules for both users');
+reset role;
+set local role authenticated;
+delete from public.schedules where id = '10000000-0000-4000-8000-000000000001';
+select is(
+  (select count(*) from public.schedules
+    where id = '10000000-0000-4000-8000-000000000001'),
+  0::bigint, 'user A can delete their own schedule'
+);
 reset role;
 
 delete from auth.users where id = '00000000-0000-4000-8000-000000000002';
