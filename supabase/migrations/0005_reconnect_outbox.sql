@@ -18,10 +18,11 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
-  update public.reconnect_email_outbox
-  set status = case when attempts >= 3 then 'failed' else 'queued' end,
+  update public.reconnect_email_outbox as stale
+  set status = case when stale.attempts >= 3 then 'failed' else 'queued' end,
       claimed_at = null
-  where status = 'sending' and claimed_at < now() - interval '10 minutes';
+  where stale.status = 'sending'
+    and stale.claimed_at < now() - interval '10 minutes';
 
   return query
   with due as (
