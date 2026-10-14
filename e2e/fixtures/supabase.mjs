@@ -6,6 +6,23 @@ const origin = "http://127.0.0.1:3101";
 const appOrigin = "http://127.0.0.1:3100";
 const gmailScope = "https://www.googleapis.com/auth/gmail.send";
 const publicColumns = "user_id,google_email,is_workspace,status,connected_at";
+const scheduleColumns = [
+  "id",
+  "user_id",
+  "subject",
+  "body_text",
+  "body_html",
+  "to",
+  "cc",
+  "bcc",
+  "rrule",
+  "timezone",
+  "source",
+  "status",
+  "next_send_at",
+  "created_at",
+  "updated_at",
+];
 const scenarios = new Map();
 const codes = new Map();
 
@@ -16,6 +33,30 @@ function newUser(domain = "gmail.com") {
     email: `${id}@${domain}`,
     accessToken: `fake-secret-session-access-${id}`,
     refreshToken: `fake-secret-session-refresh-${id}`,
+  };
+}
+
+function newSchedule(user, status = "active") {
+  const now = new Date().toISOString();
+  const next = new Date(Date.now() + 3600000);
+  next.setUTCMilliseconds(0);
+  const start = next.toISOString().replace(/[-:]/g, "").replace(".000", "");
+  return {
+    id: randomUUID(),
+    user_id: user.id,
+    subject: "Fixture reminder",
+    body_text: "A recurring fixture reminder.",
+    body_html: null,
+    to: ["recipient@example.test"],
+    cc: [],
+    bcc: [],
+    rrule: `DTSTART:${start}\nRRULE:FREQ=DAILY`,
+    timezone: "UTC",
+    source: "web",
+    status,
+    next_send_at: next.toISOString(),
+    created_at: now,
+    updated_at: now,
   };
 }
 
@@ -45,9 +86,9 @@ function newScenario() {
       ]),
     ),
     schedules: [
-      { id: randomUUID(), user_id: owner.id, status: "active" },
-      { id: randomUUID(), user_id: owner.id, status: "paused" },
-      { id: randomUUID(), user_id: connected.id, status: "active" },
+      newSchedule(owner),
+      newSchedule(owner, "paused"),
+      newSchedule(connected),
     ],
     revokedTokens: [],
     exchanges: [],
@@ -93,9 +134,20 @@ createServer(async (req, res) => {
       return reply(201, scenario);
     }
     if (url.pathname.startsWith("/__test/scenarios/")) {
-      const id = url.pathname.slice("/__test/scenarios/".length);
+      const [id, setup] = url.pathname
+        .slice("/__test/scenarios/".length)
+        .split("/");
       const scenario = scenarios.get(id);
       if (!scenario) return reply(404, { error: "unknown test scenario" });
+      if (setup === "schedule-api" && req.method === "POST") {
+        // Isolate forecasts for the already-connected personal Gmail account.
+        // Keep foreign owner rows so browser tests still exercise owner filtering.
+        scenario.schedules = scenario.schedules.filter(
+          (schedule) => schedule.user_id !== scenario.connected.id,
+        );
+        return reply(200, { user_id: scenario.connected.id });
+      }
+      if (setup) return reply(404, { error: "unknown test setup" });
       if (req.method === "DELETE") {
         scenarios.delete(id);
         for (const [code, grant] of codes)
@@ -239,6 +291,117 @@ createServer(async (req, res) => {
     const service =
       bearer === "fake-service-key" &&
       req.headers.apikey === "fake-service-key";
+    if (url.pathname === "/rest/v1/schedules" && !service) {
+      if (!identity || req.headers.apikey !== "fake-anon-key")
+        return reply(401, { error: "unauthorized" });
+      if (req.method === "POST") {
+        if (
+          ["user_id", "id", "status"].some((field) =>
+            url.searchParams.has(field),
+          )
+        )
+          return reply(400, {
+            error: "schedule insert filters are unsupported",
+          });
+      } else if (url.searchParams.get("user_id") !== `eq.${identity.user.id}`)
+        return reply(403, { error: "caller owner filter required" });
+      const columns = (url.searchParams.get("select") ?? "*").split(",");
+      if (
+        columns.some(
+          (column) => column !== "*" && !scheduleColumns.includes(column),
+        )
+      )
+        return reply(400, { error: "unknown schedule column" });
+      const filters = ["id", "status"].map((field) => [
+        field,
+        url.searchParams.get(field),
+      ]);
+      if (
+        filters.some(([, value]) => value !== null && !value.startsWith("eq."))
+      )
+        return reply(400, { error: "unsupported schedule filter" });
+      const matches = (row) =>
+        row.user_id === identity.user.id &&
+        filters.every(
+          ([field, value]) => value === null || `eq.${row[field]}` === value,
+        );
+      const project = (row) =>
+        Object.fromEntries(
+          (columns.includes("*") ? scheduleColumns : columns).map((column) => [
+            column,
+            row[column],
+          ]),
+        );
+      const representation = req.headers.prefer
+        ?.split(",")
+        .some((value) => value.trim() === "return=representation");
+      if (req.method === "POST") {
+        const data = JSON.parse(await body(req));
+        if (!data || Array.isArray(data) || data.user_id !== identity.user.id)
+          return reply(403, { error: "caller owner required" });
+        if (
+          Object.keys(data).some((field) => !scheduleColumns.includes(field)) ||
+          ["subject", "body_text", "rrule", "timezone", "next_send_at"].some(
+            (field) => typeof data[field] !== "string",
+          )
+        )
+          return reply(400, { error: "invalid schedule row" });
+        const row = {
+          ...newSchedule(identity.user, "paused"),
+          ...data,
+          id: randomUUID(),
+        };
+        identity.scenario.schedules.push(row);
+        return reply(201, representation ? [project(row)] : undefined);
+      }
+      let rows = identity.scenario.schedules.filter(matches);
+      if (req.method === "GET") {
+        const order = url.searchParams.get("order");
+        if (order && order !== "created_at.desc,id.asc")
+          return reply(400, { error: "unsupported schedule order" });
+        if (order)
+          rows.sort(
+            (a, b) =>
+              b.created_at.localeCompare(a.created_at) ||
+              a.id.localeCompare(b.id),
+          );
+        const limit = url.searchParams.get("limit");
+        if (limit !== null) {
+          if (!/^[1-9]\d*$/.test(limit))
+            return reply(400, { error: "invalid schedule limit" });
+          rows = rows.slice(0, Number(limit));
+        }
+        return reply(200, rows.map(project));
+      }
+      if (req.method === "PATCH") {
+        const data = JSON.parse(await body(req));
+        if (!data || Array.isArray(data) || typeof data !== "object")
+          return reply(400, { error: "invalid schedule changes" });
+        if (
+          Object.keys(data).some(
+            (field) =>
+              !scheduleColumns.includes(field) ||
+              ["id", "user_id", "created_at"].includes(field),
+          )
+        )
+          return reply(403, { error: "immutable schedule column" });
+        for (const row of rows) Object.assign(row, data);
+        return reply(
+          representation ? 200 : 204,
+          representation ? rows.map(project) : undefined,
+        );
+      }
+      if (req.method === "DELETE") {
+        identity.scenario.schedules = identity.scenario.schedules.filter(
+          (row) => !matches(row),
+        );
+        return reply(
+          representation ? 200 : 204,
+          representation ? rows.map(project) : undefined,
+        );
+      }
+      return reply(405, { error: "unsupported schedule method" });
+    }
     if (
       url.pathname === "/rest/v1/gmail_connections" &&
       req.method === "GET" &&

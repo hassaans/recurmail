@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 const appDirectory = dirname(fileURLToPath(import.meta.url));
 
 const nextConfig = {
+  transpilePackages: ["@recurmail/core"],
   outputFileTracingRoot: resolve(appDirectory, "../.."),
   // Callback query strings contain OAuth codes; handler errors use safe events.
   logging: {

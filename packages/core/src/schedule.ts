@@ -1,9 +1,11 @@
 import { DateTime, IANAZone } from "luxon";
 import type { RRule as RecurrenceRule } from "rrule";
-import rrule from "rrule";
+import * as rrule from "rrule";
 
-// The default import also works with rrule's CommonJS entry in native Node/Deno.
-const { RRule } = rrule;
+// Bundlers resolve rrule's ESM entry; native Node/Deno expose its CJS exports
+// through default because the CJS bundle does not support named imports.
+const rruleExports = rrule as typeof rrule & { default?: typeof rrule };
+const { RRule } = rruleExports.default ?? rruleExports;
 const DAY_MS = 86_400_000;
 const WEEKDAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 
