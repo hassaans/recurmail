@@ -381,6 +381,32 @@ describe("US-005 schedule HTTP handlers with injected persistence", () => {
     expect(f.store.readConnection).toHaveBeenCalledWith(owner.id, accessToken);
   });
 
+  it("sanitizes body_html on create and patch before persistence", async () => {
+    const f = fixture([row()]);
+    const unsafe =
+      '<p onclick="evil()">Hi</p><script>evil()</script><a href="javascript:evil()">link</a>';
+    const created = await f.handlers.create(
+      request("/api/schedules", "POST", input({ body_html: unsafe })),
+    );
+    expect(created.status).toBe(201);
+    expect(f.store.create).toHaveBeenCalledWith(
+      expect.objectContaining({ body_html: "<p>Hi</p><a>link</a>" }),
+      accessToken,
+    );
+
+    const patched = await f.handlers.patch(
+      request("/api/schedules/schedule-1", "PATCH", { body_html: unsafe }),
+      "schedule-1",
+    );
+    expect(patched.status).toBe(200);
+    expect(f.store.update).toHaveBeenCalledWith(
+      owner.id,
+      "schedule-1",
+      expect.objectContaining({ body_html: "<p>Hi</p><a>link</a>" }),
+      accessToken,
+    );
+  });
+
   it.each([
     [399, "ok", false],
     [400, "warn", true],

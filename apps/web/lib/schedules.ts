@@ -7,6 +7,7 @@ import {
 import type { PublicConnection } from "./connections";
 import type { Authenticate, Identity } from "./gmail-flow";
 import { sameOrigin } from "./http";
+import { sanitizeScheduleHtml } from "./sanitize";
 import { ScheduleStorageError } from "./schedule-store";
 
 export interface ScheduleInput {
@@ -152,6 +153,8 @@ function normalize(value: unknown, at: Date): ScheduleInput {
     !Object.hasOwn(input, "body_html") || input.body_html === null
       ? null
       : stringInput(input.body_html, "body_html", 0, 100000);
+  const safeBodyHtml =
+    body_html === null ? null : sanitizeScheduleHtml(body_html);
   const to = recipients(input.to, "to");
   const cc = Object.hasOwn(input, "cc") ? recipients(input.cc, "cc") : [];
   const bcc = Object.hasOwn(input, "bcc") ? recipients(input.bcc, "bcc") : [];
@@ -177,7 +180,7 @@ function normalize(value: unknown, at: Date): ScheduleInput {
   return {
     subject,
     body_text,
-    body_html,
+    body_html: safeBodyHtml,
     to,
     cc,
     bcc,

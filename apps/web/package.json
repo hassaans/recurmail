@@ -13,11 +13,13 @@
     "@recurmail/core": "workspace:*",
     "next": "^15.5.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "sanitize-html": "^2.18.1"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
     "@types/react": "^19.1.0",
-    "@types/react-dom": "^19.1.0"
+    "@types/react-dom": "^19.1.0",
+    "@types/sanitize-html": "^2.16.2"
   }
 }
