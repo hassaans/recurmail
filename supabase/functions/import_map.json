@@ -1,0 +1,8 @@
+{
+  "imports": {
+    "@recurmail/core": "../../packages/core/src/index.ts",
+    "@types/luxon": "npm:@types/luxon@3.7.6",
+    "luxon": "npm:luxon@3.7.2",
+    "rrule": "npm:rrule@2.8.1"
+  }
+}
