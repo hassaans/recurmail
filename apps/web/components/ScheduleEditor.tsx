@@ -289,7 +289,7 @@ export default function ScheduleEditor({
         <a href="/dashboard">Dashboard</a>
       </header>
       <main id="editor" className={styles.main}>
-        <p className={styles.eyebrow}>Write once. Send on a schedule.</p>
+        <p className={styles.eyebrow}>Set up a repeating email.</p>
         <h1>{scheduleId ? "Edit schedule" : "New schedule"}</h1>
         {error ? (
           <p className={styles.error} role="alert">
