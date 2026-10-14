@@ -55,6 +55,9 @@ select is((select status from public.schedules where id = '10000000-0000-4000-80
 select is((select status from public.gmail_connections where user_id = '00000000-0000-4000-8000-000000000006'), 'needs_reconnect', 'connection requires reconnect');
 select is((select count(*) from public.reconnect_email_outbox where user_id = '00000000-0000-4000-8000-000000000006' and status = 'queued'), 1::bigint, 'reconnect email is queued');
 select is((select count(*) from public.send_log where status = 'failed' and error_code = 'invalid_grant'), 1::bigint, 'invalid grant attempt is recorded failed');
+select is((public.get_admin_metrics()->>'failed_last_hour')::integer, (select failed_last_hour + 1 from sender_metrics_baseline), 'admin failed count includes the new failed send');
+select is((public.get_admin_metrics()->>'attempted_last_hour')::integer, (select attempted_last_hour + 2 from sender_metrics_baseline), 'admin attempted count includes the new sent and failed sends');
+select is((public.get_admin_metrics()->>'failure_rate_last_hour')::numeric, (select round((failed_last_hour + 1)::numeric / (attempted_last_hour + 2)::numeric, 4) from sender_metrics_baseline), 'admin failure rate includes failed over sent and failed attempts from the last hour');
 select public.mark_gmail_reconnect_needed(
   '10000000-0000-4000-8000-000000000008',
   '00000000-0000-4000-8000-000000000006',
@@ -67,9 +70,6 @@ select is((select count(*) from public.reconnect_email_outbox where user_id = '0
 insert into public.sender_heartbeats (id, started_at, finished_at, claimed_count, sent_count, failed_count, deferred_count)
 values ('30000000-0000-4000-8000-000000000006', now() - interval '1 second', now(), 3, 1, 1, 1);
 select is((select count(*) from public.sender_heartbeats where claimed_count = 3 and sent_count = 1 and failed_count = 1 and deferred_count = 1), 1::bigint, 'sender run writes heartbeat counts');
-select is((public.get_admin_metrics()->>'failed_last_hour')::integer, (select failed_last_hour + 1 from sender_metrics_baseline), 'admin failed count includes the new failed send');
-select is((public.get_admin_metrics()->>'attempted_last_hour')::integer, (select attempted_last_hour + 2 from sender_metrics_baseline), 'admin attempted count includes the new sent and failed sends');
-select is((public.get_admin_metrics()->>'failure_rate_last_hour')::numeric, (select round((failed_last_hour + 1)::numeric / (attempted_last_hour + 2)::numeric, 4) from sender_metrics_baseline), 'admin failure rate includes failed over sent and failed attempts from the last hour');
 
 delete from auth.users where id = '00000000-0000-4000-8000-000000000006';
 delete from public.sender_heartbeats where id = '30000000-0000-4000-8000-000000000006';
