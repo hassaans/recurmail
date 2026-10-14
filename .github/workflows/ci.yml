@@ -51,11 +51,12 @@ jobs:
           line = next((line for line in sys.stdin if line.startswith("DB_URL=")), "")
           value = line.partition("=")[2].strip().strip(chr(34)) if line else ""
           parsed = urlsplit(value)
+          username = unquote(parsed.username or "")
           password = unquote(parsed.password or "")
-          if not password:
-              raise SystemExit("local database URL did not include a password")
+          if not username or not password:
+              raise SystemExit("local database URL did not include credentials")
           query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-          query["options"] = f"-c hq.test_db_password={password}"
+          query["options"] = f"-c hq.test_db_user={username} -c hq.test_db_password={password}"
           print(urlunsplit(parsed._replace(query=urlencode(query))))
           ')"
           supabase test db --db-url "$test_db_url"
