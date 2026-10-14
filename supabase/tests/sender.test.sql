@@ -1,7 +1,13 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(20);
+select plan(22);
+
+create temporary table sender_metrics_baseline on commit preserve rows as
+select
+  count(*) filter (where status = 'failed' and attempted_at >= now() - interval '1 hour')::integer as failed_last_hour,
+  count(*) filter (where status in ('sent', 'failed') and attempted_at >= now() - interval '1 hour')::integer as attempted_last_hour
+from public.send_log;
 
 insert into auth.users (id, email, aud, role) values
   ('00000000-0000-4000-8000-000000000006', 'sender@example.test', 'authenticated', 'authenticated');
@@ -61,7 +67,9 @@ select is((select count(*) from public.reconnect_email_outbox where user_id = '0
 insert into public.sender_heartbeats (id, started_at, finished_at, claimed_count, sent_count, failed_count, deferred_count)
 values ('30000000-0000-4000-8000-000000000006', now() - interval '1 second', now(), 3, 1, 1, 1);
 select is((select count(*) from public.sender_heartbeats where claimed_count = 3 and sent_count = 1 and failed_count = 1 and deferred_count = 1), 1::bigint, 'sender run writes heartbeat counts');
-select is((public.get_admin_metrics()->>'failure_rate_last_hour')::numeric, 0.5::numeric, 'admin failure rate uses failed over sent and failed attempts from the last hour');
+select is((public.get_admin_metrics()->>'failed_last_hour')::integer, (select failed_last_hour + 1 from sender_metrics_baseline), 'admin failed count includes the new failed send');
+select is((public.get_admin_metrics()->>'attempted_last_hour')::integer, (select attempted_last_hour + 2 from sender_metrics_baseline), 'admin attempted count includes the new sent and failed sends');
+select is((public.get_admin_metrics()->>'failure_rate_last_hour')::numeric, (select round((failed_last_hour + 1)::numeric / (attempted_last_hour + 2)::numeric, 4) from sender_metrics_baseline), 'admin failure rate includes failed over sent and failed attempts from the last hour');
 
 delete from auth.users where id = '00000000-0000-4000-8000-000000000006';
 delete from public.sender_heartbeats where id = '30000000-0000-4000-8000-000000000006';
