@@ -18,7 +18,7 @@ insert into public.schedules (
 commit;
 begin;
 
-select like(pg_get_functiondef('public.claim_due_schedules(integer)'::regprocedure), '%skip locked%', 'claim function uses SKIP LOCKED');
+select ok(pg_get_functiondef('public.claim_due_schedules(integer)'::regprocedure) ilike '%skip locked%', 'claim function uses SKIP LOCKED');
 select extensions.dblink_connect('sender_concurrency', 'dbname=postgres');
 select extensions.dblink_exec('sender_concurrency', 'begin');
 select is(
