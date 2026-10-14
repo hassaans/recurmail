@@ -1,7 +1,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(11);
+select plan(14);
 
 insert into auth.users (id, email, aud, role) values
   ('00000000-0000-4000-8000-000000000001', 'rls-a@example.test', 'authenticated', 'authenticated'),
@@ -30,7 +30,16 @@ select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000001
 set local role authenticated;
 
 select is((select count(*) from public.schedules), 1::bigint, 'user A sees only their schedules');
-select is((select count(*) from public.gmail_connections), 1::bigint, 'user A sees only their Gmail connection');
+select is((select count(id) from public.gmail_connections), 1::bigint, 'user A can select their Gmail connection non-secret columns');
+select throws_ok(
+  $$select encrypted_refresh_token from public.gmail_connections$$,
+  '42501', null, 'user A cannot read encrypted refresh tokens'
+);
+select throws_ok(
+  $$update public.gmail_connections set encrypted_refresh_token = 'forged'
+    where user_id = '00000000-0000-4000-8000-000000000001'$$,
+  '42501', null, 'user A cannot update their encrypted refresh token'
+);
 select is((select count(*) from public.send_log), 1::bigint, 'user A sees only their send history');
 select throws_ok(
   $$insert into public.schedules (user_id, subject, body_text, "to", rrule, timezone, next_send_at, status, source)
@@ -44,11 +53,17 @@ select throws_ok(
 );
 select throws_ok(
   $$insert into public.send_log (schedule_id, user_id, scheduled_for, status)
-    values ('10000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000002', now(), 'sent')$$,
-  '42501', null, 'user A cannot insert send history owned by user B'
+    values ('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', now(), 'sent')$$,
+  '42501', null, 'user A cannot insert their own send history'
 );
 update public.schedules set subject = 'overwritten by A'
 where id = '10000000-0000-4000-8000-000000000002';
+select is(
+  (with deleted as (delete from public.schedules
+    where id = '10000000-0000-4000-8000-000000000001' returning id)
+   select count(*) from deleted),
+  1::bigint, 'user A can delete their own schedule'
+);
 reset role;
 select is(
   (select subject from public.schedules where id = '10000000-0000-4000-8000-000000000002'),
