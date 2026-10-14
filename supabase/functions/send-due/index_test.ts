@@ -85,16 +85,26 @@ function recordingStore(schedules: ClaimedSchedule[]): SenderStore & {
   completed: unknown[];
   reconnects: unknown[];
   heartbeats: unknown[];
+  reclaimed: unknown[];
+  failureLogs: unknown[];
 } {
   const state = {
     completed: [] as unknown[],
     reconnects: [] as unknown[],
     heartbeats: [] as unknown[],
+    reclaimed: [] as unknown[],
+    failureLogs: [] as unknown[],
   };
   return {
     ...state,
     async claim() {
       return schedules;
+    },
+    async reclaimStaleSending() {
+      return state.reclaimed as ClaimedSchedule[];
+    },
+    async recordFailure(value) {
+      state.failureLogs.push(value);
     },
     async complete(value) {
       state.completed.push(value);
@@ -408,4 +418,124 @@ Deno.test("Gmail send timeouts are failed and never retried", async () => {
     ],
     "timeout send_log row advances without retrying the occurrence",
   );
+});
+
+Deno.test("stale claims are failed and advanced without another Gmail send", async () => {
+  const { envelope, key } = await nodeEncryptedToken();
+  const stale = dueSchedule(envelope);
+  const store = recordingStore([]);
+  store.reclaimed.push(stale);
+  let sends = 0;
+  const result = await runSender(store, {
+    key,
+    clientId: "fake",
+    clientSecret: "fake",
+    appUrl: "https://recurmail.example.test",
+    now: () => new Date("2026-10-14T18:00:00.000Z"),
+    send: async () => {
+      sends += 1;
+      return "should-not-send";
+    },
+  });
+  equal(sends, 0, "a stale claim is not sent again");
+  equal(store.completed, [
+    {
+      scheduleId: "schedule-1",
+      scheduledFor: "2026-10-14T17:00:00.000Z",
+      status: "failed",
+      nextSendAt: "2026-10-15T17:00:00.000Z",
+      errorCode: "claim_expired",
+    },
+  ], "stale occurrence is failed and advanced");
+  equal(result.failed, 1, "stale claim is counted as failed");
+  equal(store.heartbeats.length, 1, "recovery writes a heartbeat");
+});
+
+Deno.test("one completion store failure does not stop later schedules or heartbeat", async () => {
+  const { envelope, key } = await nodeEncryptedToken();
+  const schedules = [
+    dueSchedule(envelope),
+    { ...dueSchedule(envelope), schedule_id: "schedule-2" },
+    { ...dueSchedule(envelope), schedule_id: "schedule-3" },
+  ];
+  const store = recordingStore(schedules);
+  store.complete = async (value) => {
+    if (value.scheduleId === "schedule-1")
+      throw new Error("database connection dropped");
+    store.completed.push(value);
+  };
+  const result = await runSender(store, {
+    key,
+    clientId: "fake",
+    clientSecret: "fake",
+    appUrl: "https://recurmail.example.test",
+    send: async (schedule) => `message-${schedule.schedule_id}`,
+  });
+  equal(result, { claimed: 3, sent: 2, failed: 1, deferred: 0 }, "batch totals");
+  equal(
+    store.completed.map((row) => (row as { scheduleId: string }).scheduleId),
+    ["schedule-2", "schedule-3"],
+    "later schedules are completed after the first store failure",
+  );
+  equal(store.failureLogs, [
+    {
+      scheduleId: "schedule-1",
+      scheduledFor: "2026-10-14T17:00:00.000Z",
+      errorCode: "post_send_store_failed",
+    },
+  ], "the accepted message is logged with its distinct store failure code");
+  equal(store.heartbeats.length, 1, "heartbeat is written despite a store failure");
+});
+
+Deno.test("post-send DB failure is logged and a later run reclaims without resending", async () => {
+  const { envelope, key } = await nodeEncryptedToken();
+  const stale = dueSchedule(envelope);
+  const store = recordingStore([stale]);
+  let allowRecovery = false;
+  store.reclaimStaleSending = async () => allowRecovery ? [stale] : [];
+  store.claim = async () => allowRecovery ? [] : [stale];
+  store.complete = async (value) => {
+    if (value.status === "sent") throw new Error("database write failed after Gmail accepted");
+    store.completed.push(value);
+  };
+  let sends = 0;
+  const first = await runSender(store, {
+    key,
+    clientId: "fake",
+    clientSecret: "fake",
+    appUrl: "https://recurmail.example.test",
+    send: async () => {
+      sends += 1;
+      return "accepted-message";
+    },
+  });
+  equal(first.failed, 1, "post-send DB failure is counted as failed");
+  equal(store.failureLogs[0], {
+    scheduleId: "schedule-1",
+    scheduledFor: "2026-10-14T17:00:00.000Z",
+    errorCode: "post_send_store_failed",
+  }, "post-send failure keeps a distinct log code");
+
+  allowRecovery = true;
+  store.completed.length = 0;
+  const second = await runSender(store, {
+    key,
+    clientId: "fake",
+    clientSecret: "fake",
+    appUrl: "https://recurmail.example.test",
+    now: () => new Date("2026-10-14T18:00:00.000Z"),
+    send: async () => {
+      sends += 1;
+      return "duplicate-send-forbidden";
+    },
+  });
+  equal(sends, 1, "a recovered accepted message is never sent again");
+  equal(second.failed, 1, "recovery accounts for the unknown outcome");
+  equal(store.completed[0], {
+    scheduleId: "schedule-1",
+    scheduledFor: "2026-10-14T17:00:00.000Z",
+    status: "failed",
+    nextSendAt: "2026-10-15T17:00:00.000Z",
+    errorCode: "claim_expired",
+  }, "the later run advances the still-sending schedule");
 });
