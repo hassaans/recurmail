@@ -23,7 +23,9 @@ type HasFunction<T> = T extends (...args: never[]) => unknown
 type Assert<T extends true> = T;
 
 type ScheduleEditorPropsAreDataOnly = Assert<
-  HasFunction<ComponentProps<typeof ScheduleEditor>> extends false ? true : false
+  HasFunction<ComponentProps<typeof ScheduleEditor>> extends false
+    ? true
+    : false
 >;
 type ScheduleListPropsAreDataOnly = Assert<
   HasFunction<ComponentProps<typeof ScheduleList>> extends false ? true : false
@@ -152,6 +154,14 @@ function functionPropsInPage(pagePath: string): string[] {
 }
 
 describe("server/client prop boundaries", () => {
+  it("keeps client component props data-only at compile time", () => {
+    const editorPropsAreDataOnly: ScheduleEditorPropsAreDataOnly = true;
+    const listPropsAreDataOnly: ScheduleListPropsAreDataOnly = true;
+
+    expect(editorPropsAreDataOnly).toBe(true);
+    expect(listPropsAreDataOnly).toBe(true);
+  });
+
   it("round-trips representative client component props through JSON", () => {
     const editorProps: ComponentProps<typeof ScheduleEditor> = {
       scheduleId: "c4a7b913-3d35-4c0d-8e7c-4c5d101f3f88",
