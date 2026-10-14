@@ -32,13 +32,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if rg -l --hidden -i 'supabase\.co' apps/web/.next/static >/dev/null; then
+          if [ ! -d apps/web/.next/static ] || [ ! -d apps/web/.next/server/app ]; then
+            echo "Web build output is missing; cannot scan for Supabase project addresses."
+            exit 1
+          fi
+          matches_file="$RUNNER_TEMP/supabase-address-matches.txt"
+          scan_status=0
+          grep -RIl --binary-files=without-match -i 'supabase\.co' apps/web/.next/static > "$matches_file" || scan_status=$?
+          if [ "$scan_status" -eq 0 ]; then
             echo "Supabase project address found in static browser output."
             exit 1
           fi
-          if rg -l --hidden -i --glob '*.html' 'supabase\.co' apps/web/.next/server/app >/dev/null; then
+          if [ "$scan_status" -ne 1 ]; then
+            echo "Could not scan static browser output."
+            exit "$scan_status"
+          fi
+          scan_status=0
+          grep -RIl --binary-files=without-match --include='*.html' -i 'supabase\.co' apps/web/.next/server/app > "$matches_file" || scan_status=$?
+          if [ "$scan_status" -eq 0 ]; then
             echo "Supabase project address found in prerendered HTML."
             exit 1
+          fi
+          if [ "$scan_status" -ne 1 ]; then
+            echo "Could not scan prerendered HTML."
+            exit "$scan_status"
           fi
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm e2e
