@@ -1,0 +1,927 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "Recurmail Schedule API",
+    "version": "0.1.0",
+    "description": "US-005 authenticated owner-only schedule management. All data access uses the verified user's Supabase access token and owner filters under RLS. Mutation requests require an Origin matching configured APP_URL; reads do not. The encrypted rm_session cookie establishes the session. Server-controlled id, user_id, status, next_send_at and timestamps are ignored in JSON input. New schedules are active immediately. Forecast warnings are advisory and do not block saving."
+  },
+  "security": [
+    {
+      "SessionCookie": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Schedules",
+      "description": "Manage recurring email schedules owned by the signed-in user."
+    }
+  ],
+  "paths": {
+    "/api/schedules": {
+      "get": {
+        "operationId": "listSchedules",
+        "summary": "List the authenticated owner's schedules",
+        "tags": [
+          "Schedules"
+        ],
+        "responses": {
+          "200": {
+            "description": "List the authenticated owner's schedules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createSchedule",
+        "summary": "Create an active schedule and forecast daily recipient deliveries",
+        "tags": [
+          "Schedules"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Create an active schedule and forecast daily recipient deliveries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleForecast"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/schedules/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ScheduleId"
+        }
+      ],
+      "get": {
+        "operationId": "getSchedule",
+        "summary": "Get an owned schedule",
+        "tags": [
+          "Schedules"
+        ],
+        "responses": {
+          "200": {
+            "description": "Get an owned schedule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchSchedule",
+        "summary": "Update provided editable fields and return the daily forecast",
+        "tags": [
+          "Schedules"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SchedulePatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Update provided editable fields and return the daily forecast",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleForecast"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteSchedule",
+        "summary": "Delete an owned schedule",
+        "tags": [
+          "Schedules"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Schedule deleted; no response body."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/schedules/{id}/pause": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ScheduleId"
+        }
+      ],
+      "post": {
+        "operationId": "pauseSchedule",
+        "summary": "Pause an owned schedule",
+        "tags": [
+          "Schedules"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pause an owned schedule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/schedules/{id}/resume": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ScheduleId"
+        }
+      ],
+      "post": {
+        "operationId": "resumeSchedule",
+        "summary": "Activate an owned schedule with a new strictly future next send and forecast",
+        "tags": [
+          "Schedules"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Activate an owned schedule with a new strictly future next send and forecast",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleForecast"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/schedules/pause-all": {
+      "post": {
+        "operationId": "pauseAllSchedules",
+        "summary": "Pause all active owner schedules",
+        "tags": [
+          "Schedules"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pause all active owner schedules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PauseAllResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "SessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "rm_session",
+        "description": "HttpOnly encrypted session cookie from the existing sign-in flow; verified against Supabase before accessing schedules."
+      }
+    },
+    "parameters": {
+      "ScheduleId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Schedule ID. Missing and foreign IDs both return 404."
+      },
+      "Origin": {
+        "name": "Origin",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uri"
+        },
+        "description": "Must exactly equal the trusted APP_URL origin. Missing, null and cross-origin values return 403."
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Malformed JSON or invalid schedule input.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No authenticated session.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Request origin is missing or does not match the configured application origin.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No schedule with this ID belongs to the authenticated owner.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Authentication, persistence or forecasting failed. Internal details are logged safely and not exposed.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "Schedule API runtime is not configured.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Email": {
+        "type": "string",
+        "format": "email",
+        "maxLength": 254,
+        "pattern": "^[^\\s@\\r\\n]+@[^\\s@\\r\\n]+$",
+        "description": "Bare ASCII email address accepted by the core MIME builder; display names and CRLF are rejected."
+      },
+      "ScheduleInput": {
+        "type": "object",
+        "required": [
+          "subject",
+          "body_text",
+          "to",
+          "rrule",
+          "timezone"
+        ],
+        "properties": {
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 998,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "description": "Email subject. Header control characters, including CR and LF, are rejected."
+          },
+          "body_text": {
+            "type": "string",
+            "maxLength": 100000,
+            "description": "Plain text body; empty strings are allowed."
+          },
+          "body_html": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100000,
+            "default": null,
+            "description": "Optional HTML body; empty strings are allowed."
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Email"
+            }
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Email"
+            },
+            "default": []
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Email"
+            },
+            "default": []
+          },
+          "rrule": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Valid RRULE with optional DTSTART, as supported by @recurmail/core. DTSTART TZID must match timezone. Creation, recurrence changes and resume require an occurrence strictly after now."
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Valid IANA timezone.",
+            "examples": [
+              "UTC",
+              "America/New_York"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "web",
+              "api",
+              "cli",
+              "mcp"
+            ],
+            "default": "web"
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "to"
+            ],
+            "properties": {
+              "to": {
+                "minItems": 1
+              }
+            }
+          },
+          {
+            "required": [
+              "cc"
+            ],
+            "properties": {
+              "cc": {
+                "minItems": 1
+              }
+            }
+          },
+          {
+            "required": [
+              "bcc"
+            ],
+            "properties": {
+              "bcc": {
+                "minItems": 1
+              }
+            }
+          }
+        ],
+        "description": "At least one recipient is required overall across To, Cc and Bcc. Unrecognized and server-controlled fields are ignored."
+      },
+      "SchedulePatch": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 998,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "description": "Email subject. Header control characters, including CR and LF, are rejected."
+          },
+          "body_text": {
+            "type": "string",
+            "maxLength": 100000,
+            "description": "Plain text body; empty strings are allowed."
+          },
+          "body_html": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100000,
+            "description": "Optional HTML body; empty strings are allowed."
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Email"
+            }
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Email"
+            }
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Email"
+            }
+          },
+          "rrule": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Valid RRULE with optional DTSTART, as supported by @recurmail/core. DTSTART TZID must match timezone. Creation, recurrence changes and resume require an occurrence strictly after now."
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Valid IANA timezone.",
+            "examples": [
+              "UTC",
+              "America/New_York"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "web",
+              "api",
+              "cli",
+              "mcp"
+            ]
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "subject"
+            ]
+          },
+          {
+            "required": [
+              "body_text"
+            ]
+          },
+          {
+            "required": [
+              "body_html"
+            ]
+          },
+          {
+            "required": [
+              "to"
+            ]
+          },
+          {
+            "required": [
+              "cc"
+            ]
+          },
+          {
+            "required": [
+              "bcc"
+            ]
+          },
+          {
+            "required": [
+              "rrule"
+            ]
+          },
+          {
+            "required": [
+              "timezone"
+            ]
+          },
+          {
+            "required": [
+              "source"
+            ]
+          }
+        ],
+        "description": "Only provided editable fields are written. The resulting schedule must satisfy ScheduleInput validation, including at least one recipient. Changing RRULE or timezone recomputes next_send_at strictly after now; other edits retain it. Ownership, IDs, lifecycle and timestamps cannot be supplied."
+      },
+      "Schedule": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ScheduleInput"
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "user_id",
+              "status",
+              "next_send_at",
+              "created_at",
+              "updated_at",
+              "cc",
+              "bcc",
+              "body_html",
+              "source"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "readOnly": true
+              },
+              "user_id": {
+                "type": "string",
+                "format": "uuid",
+                "readOnly": true
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "paused",
+                  "sending"
+                ],
+                "readOnly": true
+              },
+              "next_send_at": {
+                "type": "string",
+                "format": "date-time",
+                "readOnly": true
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time",
+                "readOnly": true
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time",
+                "readOnly": true
+              }
+            }
+          }
+        ]
+      },
+      "ScheduleResult": {
+        "type": "object",
+        "required": [
+          "schedule"
+        ],
+        "properties": {
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule"
+          }
+        }
+      },
+      "ScheduleList": {
+        "type": "object",
+        "required": [
+          "schedules"
+        ],
+        "properties": {
+          "schedules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Schedule"
+            }
+          }
+        }
+      },
+      "ScheduleForecast": {
+        "type": "object",
+        "required": [
+          "schedule",
+          "dailyLimitCheck"
+        ],
+        "properties": {
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule"
+          },
+          "dailyLimitCheck": {
+            "$ref": "#/components/schemas/DailyLimitCheck"
+          },
+          "warning": {
+            "type": "string",
+            "description": "Present only for a connection classified as personal (is_workspace=false) when the forecast is warn or over. Gmail versus Googlemail is determined from google_email. Workspace accounts receive their forecast without this warning."
+          }
+        }
+      },
+      "DailyLimitCheck": {
+        "type": "object",
+        "required": [
+          "status",
+          "count",
+          "limit",
+          "window",
+          "range",
+          "totalRecipients",
+          "occurrenceCount"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "warn",
+              "over"
+            ]
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "enum": [
+              500,
+              2000
+            ]
+          },
+          "window": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "required": [
+              "start",
+              "end",
+              "occurrenceCount"
+            ],
+            "properties": {
+              "start": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "occurrenceCount": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "range": {
+            "type": "object",
+            "required": [
+              "start",
+              "end"
+            ],
+            "properties": {
+              "start": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "totalRecipients": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "occurrenceCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "description": "JSON serialization of @recurmail/core dailyLimitCheck, including ISO timestamps. Forecasts all active owner schedules over 30 elapsed days and counts every To/Cc/Bcc entry. Personal connections use a 500 recipient cap, Workspace 2000; warnings start at 80%, over means greater than the cap. No connection uses the conservative 500 cap without a personal warning."
+      },
+      "PauseAllResult": {
+        "type": "object",
+        "required": [
+          "paused"
+        ],
+        "properties": {
+          "paused": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "invalid_input",
+                  "unauthenticated",
+                  "forbidden_origin",
+                  "not_found",
+                  "internal_error",
+                  "unavailable"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

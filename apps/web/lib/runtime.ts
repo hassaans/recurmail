@@ -3,6 +3,8 @@ import { createAuthHandlers, readSession } from "./auth-flow";
 import { createConnectionStore, type PublicConnection } from "./connections";
 import { type Authenticate, createGmailHandlers } from "./gmail-flow";
 import { createGoogleProvider } from "./google";
+import { createScheduleStore } from "./schedule-store";
+import { createScheduleHandlers, scheduleJson } from "./schedules";
 import { createSupabaseAuth, type SignedInUser } from "./supabase-auth";
 
 type DashboardState =
@@ -57,6 +59,15 @@ export function createRuntime(config: RuntimeConfig) {
       google,
     }),
     auth: createAuthHandlers({ origin: config.origin, key: config.key, auth }),
+    schedules: createScheduleHandlers({
+      origin: config.origin,
+      authenticate,
+      store: createScheduleStore({
+        url: config.supabaseUrl,
+        anonKey: config.anonKey,
+        fetcher: config.fetcher,
+      }),
+    }),
     async dashboard(request: Request): Promise<DashboardState> {
       try {
         const session = readSession(request, config.key);
@@ -75,6 +86,49 @@ export function createRuntime(config: RuntimeConfig) {
       }
     },
   };
+}
+
+type ScheduleHandlers = ReturnType<typeof createScheduleHandlers>;
+type ScheduleCollectionOperation = "list" | "create" | "pauseAll";
+type ScheduleItemOperation = Exclude<
+  keyof ScheduleHandlers,
+  ScheduleCollectionOperation
+>;
+
+export function runScheduleRoute(
+  operation: ScheduleCollectionOperation,
+  request: Request,
+): Promise<Response>;
+export function runScheduleRoute(
+  operation: ScheduleItemOperation,
+  request: Request,
+  id: string,
+): Promise<Response>;
+export async function runScheduleRoute(
+  operation: keyof ScheduleHandlers,
+  request: Request,
+  id?: string,
+): Promise<Response> {
+  const runtime = configuredRuntime();
+  if (!runtime)
+    return scheduleJson(
+      {
+        error: { code: "unavailable", message: "Schedule API is unavailable" },
+      },
+      503,
+    );
+  if (
+    operation === "list" ||
+    operation === "create" ||
+    operation === "pauseAll"
+  )
+    return runtime.schedules[operation](request);
+  if (!id)
+    return scheduleJson(
+      { error: { code: "invalid_input", message: "Schedule ID is required" } },
+      400,
+    );
+  return runtime.schedules[operation](request, id);
 }
 
 export function configuredRuntime(): ReturnType<typeof createRuntime> | null {
