@@ -17,8 +17,8 @@ const env = {
   TOKEN_ENCRYPTION_KEY: Buffer.from(new Uint8Array(32).fill(1)).toString(
     "base64",
   ),
-  NEXT_PUBLIC_SUPABASE_URL: "https://db.example.test",
-  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "publishable",
+  SUPABASE_URL: "https://db.example.test",
+  SUPABASE_PUBLISHABLE_KEY: "publishable",
   SUPABASE_SECRET_KEY: "sb_secret_admin",
 };
 

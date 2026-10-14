@@ -19,12 +19,29 @@ const request = (path: string, cookie?: string) =>
     headers: cookie ? { Cookie: cookie } : undefined,
   });
 function fixture() {
+  const google = {
+    authorizationUrl: vi.fn(({ redirectUri, state, challenge, nonceHash }) => {
+      const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+      url.search = new URLSearchParams({
+        client_id: "fake-google-client",
+        redirect_uri: redirectUri,
+        response_type: "code",
+        scope: "openid email profile",
+        state,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        nonce: nonceHash,
+      }).toString();
+      return url.toString();
+    }),
+    exchangeCode: vi.fn(async () => "fake-google-id-token"),
+  };
   const auth = {
     ...createSupabaseAuth({
       url: "https://db.test",
       publishableKey: "fake-publishable",
     }),
-    exchangeCode: vi.fn(async () => ({
+    exchangeIdToken: vi.fn(async (_idToken: string, _nonce: string) => ({
       accessToken: "fake-access",
       refreshToken: "fake-session-refresh",
       expiresAt: 10000,
@@ -37,17 +54,15 @@ function fixture() {
     })),
   };
   const now = vi.fn(() => 1000);
-  const handlers = createAuthHandlers({ origin, key, auth, now });
+  const handlers = createAuthHandlers({ origin, key, auth, google, now });
   const start = async () => {
     const response = await handlers.signin();
     const url = new URL(response.headers.get("location") ?? origin);
-    const state = new URL(
-      url.searchParams.get("redirect_to") ?? origin,
-    ).searchParams.get("state");
+    const state = url.searchParams.get("state");
     const cookie = response.headers.get("set-cookie")?.split(";")[0] ?? "";
-    return { response, url, state, cookie };
+    return { response, url, state, cookie, google };
   };
-  return { auth, now, handlers, start };
+  return { auth, google, now, handlers, start };
 }
 
 describe("server Supabase sign-in HTTP flow", () => {
@@ -59,13 +74,13 @@ describe("server Supabase sign-in HTTP flow", () => {
         "fake-secret access-token refresh-token oauth-code owner@gmail.com provider-body";
       let result: Response | null = null;
       if (operation === "signin") {
-        f.auth.authorizationUrl = () => {
+        f.google.authorizationUrl.mockImplementation(() => {
           throw new Error(secret);
-        };
+        });
         result = await f.handlers.signin();
       } else if (operation === "callback") {
         const { cookie, state } = await f.start();
-        f.auth.exchangeCode.mockRejectedValue(new Error(secret));
+        f.google.exchangeCode.mockRejectedValue(new Error(secret));
         result = await f.handlers.callback(
           request(`/auth/callback?state=${state}&code=oauth-code`, cookie),
         );
@@ -99,14 +114,26 @@ describe("server Supabase sign-in HTTP flow", () => {
       }
     },
   );
-  it("uses a fresh state and S256 PKCE and keeps only Supabase tokens in an HttpOnly session", async () => {
+  it("uses a fresh state, S256 PKCE and hashed nonce and stores only Supabase tokens", async () => {
     const f = fixture();
     const { response, url, state, cookie } = await f.start();
     const saved = JSON.parse(
       decryptRefreshToken(cookie.split("=")[1], key, "auth-state"),
     );
+    expect(url.origin).toBe("https://accounts.google.com");
+    expect(url.pathname).toBe("/o/oauth2/v2/auth");
+    expect(url.searchParams.get("client_id")).toBe("fake-google-client");
+    expect(url.searchParams.get("redirect_uri")).toBe(
+      `${origin}/auth/callback`,
+    );
+    expect(url.searchParams.get("response_type")).toBe("code");
+    expect(url.searchParams.get("scope")).toBe("openid email profile");
     expect(url.searchParams.get("code_challenge")).toBe(
       createHash("sha256").update(saved.verifier).digest("base64url"),
+    );
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(url.searchParams.get("nonce")).toBe(
+      createHash("sha256").update(saved.nonce).digest("hex"),
     );
     expect(response.headers.get("set-cookie")).toMatch(/HttpOnly/);
     const second = await f.start();
@@ -115,7 +142,15 @@ describe("server Supabase sign-in HTTP flow", () => {
       request(`/auth/callback?state=${state}&code=code`, cookie),
     );
     expect(result.headers.get("location")).toBe(`${origin}/dashboard`);
-    expect(f.auth.exchangeCode).toHaveBeenCalledWith("code", saved.verifier);
+    expect(f.google.exchangeCode).toHaveBeenCalledWith(
+      "code",
+      `${origin}/auth/callback`,
+      saved.verifier,
+    );
+    expect(f.auth.exchangeIdToken).toHaveBeenCalledWith(
+      "fake-google-id-token",
+      saved.nonce,
+    );
     const sessionHeader =
       result.headers
         .getSetCookie()
@@ -155,17 +190,23 @@ describe("server Supabase sign-in HTTP flow", () => {
         `${origin}/dashboard?auth=failed`,
       );
       expect(result.headers.get("set-cookie")).toContain("Max-Age=0");
-      expect(f.auth.exchangeCode).not.toHaveBeenCalled();
+      expect(f.google.exchangeCode).not.toHaveBeenCalled();
     },
   );
 
-  it.each(["exchange", "identity"])(
+  it.each(["google-token", "supabase-id-token", "nonce-mismatch", "identity"])(
     "does not create a session on %s failure",
     async (kind) => {
       const f = fixture();
       const { cookie, state } = await f.start();
-      if (kind === "exchange")
-        f.auth.exchangeCode.mockRejectedValue(new Error("fake-secret"));
+      if (kind === "google-token")
+        f.google.exchangeCode.mockRejectedValue(new Error("fake-secret"));
+      else if (kind === "supabase-id-token")
+        f.auth.exchangeIdToken.mockRejectedValue(new Error("fake-secret"));
+      else if (kind === "nonce-mismatch")
+        f.auth.exchangeIdToken.mockRejectedValue(
+          new Error("nonce mismatch rejected by Supabase"),
+        );
       else f.auth.getUser.mockResolvedValue(null as never);
       const result = await f.handlers.callback(
         request(`/auth/callback?state=${state}&code=code`, cookie),
@@ -180,6 +221,31 @@ describe("server Supabase sign-in HTTP flow", () => {
       ).toBe(false);
     },
   );
+
+  it("rejects a Google ID token when Supabase rejects its nonce", async () => {
+    const f = fixture();
+    const { cookie, state } = await f.start();
+    f.auth.exchangeIdToken.mockImplementation(async (_idToken, nonce) => {
+      if (nonce !== "nonce-bound-to-google-id-token")
+        throw new Error("nonce mismatch");
+      return {
+        accessToken: "fake-access",
+        refreshToken: "fake-session-refresh",
+        expiresAt: 10000,
+      };
+    });
+    const response = await f.handlers.callback(
+      request(`/auth/callback?state=${state}&code=code`, cookie),
+    );
+    expect(response.headers.get("location")).toBe(
+      `${origin}/dashboard?auth=failed`,
+    );
+    expect(
+      response.headers
+        .getSetCookie()
+        .some((value) => value.startsWith("rm_session=")),
+    ).toBe(false);
+  });
 
   it("refreshes a server session and clears it when the refresh is rejected", async () => {
     const f = fixture();
@@ -236,6 +302,7 @@ describe("server Supabase sign-in HTTP flow", () => {
       origin,
       key: "invalid-key",
       auth: f.auth,
+      google: f.google,
     });
     const response = await handlers.signin();
     expect(response.headers.get("location")).toBe(

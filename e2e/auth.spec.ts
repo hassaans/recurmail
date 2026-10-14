@@ -1,13 +1,23 @@
 import { createDecipheriv } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import {
   fakeSupabaseUrl,
   test,
   testEncryptionKey,
   testSessionCookie,
 } from "./fixtures/auth";
+
+async function useFakeGoogleSignin(page: Page) {
+  await page.route("**/auth/signin", async (route) => {
+    const response = await route.fetch({ maxRedirects: 0 });
+    const headers = response.headers();
+    const googleUrl = new URL(headers.location);
+    headers.location = `${fakeSupabaseUrl}${googleUrl.pathname}${googleUrl.search}`;
+    await route.fulfill({ response, headers });
+  });
+}
 
 test("signed-out visitor sees Google sign-in on the dashboard", async ({
   page,
@@ -33,11 +43,40 @@ test("signed-out visitor sees Google sign-in on the dashboard", async ({
   ).toBe(true);
 });
 
+test("the sign-in button's first redirect is Google with an app-origin callback", async ({
+  page,
+}) => {
+  await page.goto("/dashboard");
+  let authorizationUrl = "";
+  await page.route("**/auth/signin", async (route) => {
+    const response = await route.fetch({ maxRedirects: 0 });
+    authorizationUrl = response.headers().location;
+    const headers = response.headers();
+    delete headers.location;
+    await route.fulfill({
+      response,
+      status: 200,
+      headers,
+      contentType: "text/html",
+      body: "<p>Google authorization boundary</p>",
+    });
+  });
+  await page.getByRole("link", { name: "Sign in with Google" }).click();
+  await expect(page.getByText("Google authorization boundary")).toBeVisible();
+  const authorization = new URL(authorizationUrl);
+  expect(authorization.origin).toBe("https://accounts.google.com");
+  expect(authorization.pathname).toBe("/o/oauth2/v2/auth");
+  expect(
+    new URL(authorization.searchParams.get("redirect_uri") ?? "").origin,
+  ).toBe("http://127.0.0.1:3100");
+});
+
 test("Google sign-in callback with fake Supabase leads to Connect Gmail without provider tokens in the page", async ({
   page,
   context,
   scenario,
 }) => {
+  await useFakeGoogleSignin(page);
   await page.goto("/dashboard");
   await page.getByRole("link", { name: "Sign in with Google" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
@@ -225,6 +264,7 @@ test("signed-in Connect Gmail exchanges PKCE, encrypts the row, then Disconnect 
     return response.json();
   };
   await page.goto("/dashboard");
+  await useFakeGoogleSignin(page);
   await page.getByRole("link", { name: "Sign in with Google" }).click();
   await expect(
     page.getByText(`Signed in as ${scenario.owner.email}`),
@@ -246,6 +286,7 @@ test("signed-in Connect Gmail exchanges PKCE, encrypts the row, then Disconnect 
   ).toBe(false);
   const connected = await snapshot();
   expect(connected.exchanges).toEqual([
+    { scope: "openid email profile", pkceVerified: true },
     { scope: "https://www.googleapis.com/auth/gmail.send", pkceVerified: true },
   ]);
   const row = connected.connections.find(

@@ -44,8 +44,8 @@ export async function loadAdminMetrics(
   fetcher: typeof fetch = fetch,
 ): Promise<AdminMetrics | null> {
   const encryptionKey = env.TOKEN_ENCRYPTION_KEY?.trim();
-  const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const publishableKey = env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim();
+  const supabaseUrl = env.SUPABASE_URL?.trim();
+  const publishableKey = env.SUPABASE_PUBLISHABLE_KEY?.trim();
   const secretKey = env.SUPABASE_SECRET_KEY?.trim();
   const admins = new Set(
     (env.ADMIN_EMAILS || "")

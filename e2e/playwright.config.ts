@@ -30,8 +30,8 @@ export default defineConfig({
       timeout: 120_000,
       env: {
         APP_URL: "http://127.0.0.1:3100",
-        NEXT_PUBLIC_SUPABASE_URL: fakeSupabaseUrl,
-        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "fake-publishable-key",
+        SUPABASE_URL: fakeSupabaseUrl,
+        SUPABASE_PUBLISHABLE_KEY: "fake-publishable-key",
         SUPABASE_SECRET_KEY: "fake-secret-key",
         GOOGLE_CLIENT_ID: "fake-google-client",
         GOOGLE_CLIENT_SECRET: "fake-google-secret",

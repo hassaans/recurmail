@@ -30,6 +30,7 @@ const scheduleColumns = [
 ];
 const scenarios = new Map();
 const codes = new Map();
+const idTokens = new Map();
 
 function newUser(domain = "gmail.com") {
   const id = randomUUID();
@@ -222,6 +223,8 @@ createServer(async (req, res) => {
         scenarios.delete(id);
         for (const [code, grant] of codes)
           if (grant.scenario.id === id) codes.delete(code);
+        for (const [token, grant] of idTokens)
+          if (grant.user.id === scenario.owner.id) idTokens.delete(token);
         return reply(200, { deleted: true });
       }
       return reply(200, {
@@ -233,19 +236,26 @@ createServer(async (req, res) => {
         deletedUserIds: [...scenario.deletedUserIds],
       });
     }
-    if (url.pathname === "/auth/v1/authorize") {
+    if (
+      url.pathname === "/o/oauth2/v2/auth" &&
+      url.searchParams.get("scope") === "openid email profile"
+    ) {
       const id = req.headers.cookie
         ?.split(";")
         .map((cookie) => cookie.trim())
         .find((cookie) => cookie.startsWith("fake_scenario="))
         ?.slice("fake_scenario=".length);
       const scenario = scenarios.get(id);
-      const callback = new URL(url.searchParams.get("redirect_to"));
+      const callback = new URL(url.searchParams.get("redirect_uri"));
       if (
         !scenario ||
-        url.searchParams.get("provider") !== "google" ||
-        url.searchParams.get("scopes") !== "openid email profile" ||
-        url.searchParams.get("code_challenge_method") !== "s256" ||
+        url.searchParams.get("client_id") !== "fake-google-client" ||
+        url.searchParams.get("scope") !== "openid email profile" ||
+        url.searchParams.get("response_type") !== "code" ||
+        url.searchParams.get("code_challenge_method") !== "S256" ||
+        !url.searchParams.get("code_challenge") ||
+        !url.searchParams.get("nonce") ||
+        !url.searchParams.get("state") ||
         callback.origin !== appOrigin ||
         callback.pathname !== "/auth/callback"
       )
@@ -256,7 +266,10 @@ createServer(async (req, res) => {
         scenario,
         user: scenario.owner,
         challenge: url.searchParams.get("code_challenge"),
+        nonceHash: url.searchParams.get("nonce"),
+        redirectUri: callback.toString(),
       });
+      callback.searchParams.set("state", url.searchParams.get("state"));
       callback.searchParams.set("code", code);
       return redirect(callback);
     }
@@ -265,16 +278,16 @@ createServer(async (req, res) => {
         return reply(401, { error: "invalid API key" });
       const data = JSON.parse(await body(req));
       let user;
-      if (url.searchParams.get("grant_type") === "pkce") {
-        const grant = codes.get(data.auth_code);
-        codes.delete(data.auth_code);
+      if (url.searchParams.get("grant_type") === "id_token") {
+        const grant = idTokens.get(data.id_token);
+        idTokens.delete(data.id_token);
         if (
-          grant?.kind !== "auth" ||
-          createHash("sha256")
-            .update(data.code_verifier)
-            .digest("base64url") !== grant.challenge
+          data.provider !== "google" ||
+          !grant ||
+          createHash("sha256").update(data.nonce).digest("hex") !==
+            grant.nonceHash
         )
-          return reply(400, { error: "invalid_grant" });
+          return reply(400, { error: "invalid_id_token" });
         user = grant.user;
       } else
         user = findUser(
@@ -325,6 +338,24 @@ createServer(async (req, res) => {
       const data = new URLSearchParams(await body(req));
       const grant = codes.get(data.get("code"));
       codes.delete(data.get("code"));
+      if (
+        grant?.kind === "auth" &&
+        data.get("client_id") === "fake-google-client" &&
+        data.get("client_secret") === "fake-google-secret" &&
+        data.get("grant_type") === "authorization_code" &&
+        data.get("redirect_uri") === grant.redirectUri &&
+        createHash("sha256")
+          .update(data.get("code_verifier") ?? "")
+          .digest("base64url") === grant.challenge
+      ) {
+        const idToken = `fake-google-id-token-${randomUUID()}`;
+        idTokens.set(idToken, { user: grant.user, nonceHash: grant.nonceHash });
+        grant.scenario.exchanges.push({
+          scope: "openid email profile",
+          pkceVerified: true,
+        });
+        return reply(200, { id_token: idToken });
+      }
       if (
         grant?.kind !== "gmail" ||
         data.get("client_id") !== "fake-google-client" ||

@@ -2,10 +2,30 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { decryptRefreshToken, encryptRefreshToken } from "./crypto";
 import { cookieHeader, readCookie, redirectResponse } from "./http";
-import type { Session, SupabaseAuth } from "./supabase-auth";
+import type { Session } from "./supabase-auth";
 
 const stateCookie = "rm_auth_state";
 export const SESSION_COOKIE = "rm_session";
+
+interface SignInAuth {
+  exchangeIdToken(idToken: string, nonce: string): Promise<Session>;
+  refresh(refreshToken: string): Promise<Session>;
+  getUser(accessToken: string): Promise<{ id: string; email: string } | null>;
+}
+
+interface GoogleSignIn {
+  authorizationUrl(input: {
+    redirectUri: string;
+    state: string;
+    challenge: string;
+    nonceHash: string;
+  }): string;
+  exchangeCode(
+    code: string,
+    redirectUri: string,
+    verifier: string,
+  ): Promise<string>;
+}
 
 export function sessionCookie(
   session: Session,
@@ -47,7 +67,8 @@ export function readSession(request: Request, key: string): Session | null {
 export function createAuthHandlers(config: {
   origin: string;
   key: string;
-  auth: SupabaseAuth;
+  auth: SignInAuth;
+  google: GoogleSignIn;
   now?: () => number;
 }) {
   const now = config.now ?? Date.now;
@@ -69,17 +90,26 @@ export function createAuthHandlers(config: {
         const challenge = createHash("sha256")
           .update(verifier)
           .digest("base64url");
+        const nonce = randomBytes(32).toString("base64url");
+        const nonceHash = createHash("sha256").update(nonce).digest("hex");
         const envelope = encryptRefreshToken(
-          JSON.stringify({ state, verifier, expiresAt: now() + 600_000 }),
+          JSON.stringify({
+            state,
+            verifier,
+            nonce,
+            expiresAt: now() + 600_000,
+          }),
           config.key,
           "auth-state",
         );
         const response = redirectResponse(
           config.origin,
-          config.auth.authorizationUrl(
-            `${config.origin}/auth/callback?state=${state}`,
+          config.google.authorizationUrl({
+            redirectUri: `${config.origin}/auth/callback`,
+            state,
             challenge,
-          ),
+            nonceHash,
+          }),
         );
         response.headers.append(
           "Set-Cookie",
@@ -103,6 +133,7 @@ export function createAuthHandlers(config: {
         if (
           !saved.state ||
           !saved.verifier ||
+          !saved.nonce ||
           saved.state !== params.get("state") ||
           !Number.isFinite(saved.expiresAt) ||
           saved.expiresAt <= now() ||
@@ -110,7 +141,13 @@ export function createAuthHandlers(config: {
           !code
         )
           return clearState(failure());
-        const session = await config.auth.exchangeCode(code, saved.verifier);
+        const redirectUri = `${config.origin}/auth/callback`;
+        const idToken = await config.google.exchangeCode(
+          code,
+          redirectUri,
+          saved.verifier,
+        );
+        const session = await config.auth.exchangeIdToken(idToken, saved.nonce);
         if (!(await config.auth.getUser(session.accessToken)))
           return clearState(failure());
         const response = clearState(

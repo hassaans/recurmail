@@ -4,6 +4,7 @@ import { createAuthHandlers, readSession } from "./auth-flow";
 import { createConnectionStore, type PublicConnection } from "./connections";
 import { type Authenticate, createGmailHandlers } from "./gmail-flow";
 import { createGoogleProvider } from "./google";
+import { createGoogleSignIn } from "./google-signin";
 import { createScheduleStore } from "./schedule-store";
 import { createScheduleHandlers, scheduleJson } from "./schedules";
 import {
@@ -54,6 +55,12 @@ export function createRuntime(config: RuntimeConfig) {
     testOAuthOrigin: config.testOAuthOrigin,
     fetcher: config.fetcher,
   });
+  const googleSignIn = createGoogleSignIn({
+    clientId: config.googleClientId,
+    clientSecret: config.googleClientSecret,
+    testOAuthOrigin: config.testOAuthOrigin,
+    fetcher: config.fetcher,
+  });
   const authenticate: Authenticate = async (request) => {
     const session = readSession(request, config.key);
     if (!session) return null;
@@ -76,7 +83,12 @@ export function createRuntime(config: RuntimeConfig) {
       store,
       google,
     }),
-    auth: createAuthHandlers({ origin: config.origin, key: config.key, auth }),
+    auth: createAuthHandlers({
+      origin: config.origin,
+      key: config.key,
+      auth,
+      google: googleSignIn,
+    }),
     schedules: createScheduleHandlers({
       origin: config.origin,
       authenticate,
@@ -153,8 +165,8 @@ export function configuredRuntime(): ReturnType<typeof createRuntime> | null {
   const env = process.env;
   if (
     !env.APP_URL ||
-    !env.NEXT_PUBLIC_SUPABASE_URL ||
-    !env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    !env.SUPABASE_URL ||
+    !env.SUPABASE_PUBLISHABLE_KEY ||
     !env.SUPABASE_SECRET_KEY ||
     !env.GOOGLE_CLIENT_ID ||
     !env.GOOGLE_CLIENT_SECRET ||
@@ -174,8 +186,8 @@ export function configuredRuntime(): ReturnType<typeof createRuntime> | null {
     return createRuntime({
       origin: app.origin,
       key: env.TOKEN_ENCRYPTION_KEY,
-      supabaseUrl: new URL(env.NEXT_PUBLIC_SUPABASE_URL).origin,
-      publishableKey: env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+      supabaseUrl: new URL(env.SUPABASE_URL).origin,
+      publishableKey: env.SUPABASE_PUBLISHABLE_KEY,
       secretKey: env.SUPABASE_SECRET_KEY,
       googleClientId: env.GOOGLE_CLIENT_ID,
       googleClientSecret: env.GOOGLE_CLIENT_SECRET,
