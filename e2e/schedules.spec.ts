@@ -166,6 +166,100 @@ test("creates a weekly schedule with a future send, then reads, edits and delete
   expect(remaining.body.schedules).toEqual([]);
 });
 
+test("weekly Monday editor saves and dashboard shows the next Monday", async ({
+  page,
+}) => {
+  await page.goto("/schedules/new");
+  await page.getByRole("textbox", { name: "To" }).fill("weekly@example.test");
+  await page.getByLabel("Subject").fill("Monday check-in");
+  await page
+    .getByRole("textbox", { name: "Message" })
+    .fill("The weekly update.");
+  await page.getByRole("combobox", { name: "Repeat" }).selectOption("weekly");
+  await page.getByRole("checkbox", { name: "Monday" }).check();
+  await page.getByRole("textbox", { name: "Time", exact: true }).fill("09:15");
+  await expect(page.getByTestId("next-send-preview")).toContainText("Monday");
+  await expect(
+    page.getByTestId("next-send-preview").getByRole("listitem"),
+  ).toHaveCount(5);
+  await page.getByRole("button", { name: "Save schedule" }).click();
+  await expect(page).toHaveURL(/\/dashboard\?saved=1/);
+  await expect(page.getByText("Monday check-in")).toBeVisible();
+  const saved = await browserRequest<{ schedules: ScheduleRow[] }>(
+    page,
+    "/api/schedules",
+  );
+  expect(saved.body.schedules).toHaveLength(1);
+  const nextMonday = new Date(saved.body.schedules[0].next_send_at);
+  expect(nextMonday.getUTCDay()).toBe(1);
+  await expect(page.getByText(/Next send:.*Monday/i)).toBeVisible();
+});
+
+test("schedule editor fits a 375px viewport without horizontal overflow", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/schedules/new");
+  const dimensions = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+  }));
+  expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
+});
+
+test("editor displays the daily-limit warning exactly as returned by the API", async ({
+  page,
+}) => {
+  await page.goto("/schedules/new");
+  const recipients = Array.from(
+    { length: 400 },
+    (_, index) => `daily${index}@example.test`,
+  );
+  await page.getByRole("textbox", { name: "To" }).fill(recipients.join(", "));
+  await page.getByLabel("Subject").fill("Daily limit warning");
+  await page.getByRole("textbox", { name: "Message" }).fill("Daily message");
+  await page.getByRole("combobox", { name: "Repeat" }).selectOption("daily");
+  await page.getByRole("button", { name: "Save schedule" }).click();
+  await expect(page).toHaveURL(/\/dashboard\?saved=1/);
+  await expect(
+    page.getByText(
+      "Personal Gmail daily recipient limit forecast is warn (400/500).",
+      { exact: true },
+    ),
+  ).toBeVisible();
+});
+
+test("edit mode loads and saves an existing schedule", async ({ page }) => {
+  const created = await browserRequest<ForecastResponse>(
+    page,
+    "/api/schedules",
+    "POST",
+    {
+      subject: "Existing title",
+      body_text: "Existing message",
+      to: ["existing@example.test"],
+      rrule: "FREQ=WEEKLY;BYDAY=MO;BYHOUR=9;BYMINUTE=0;BYSECOND=0",
+      timezone: "UTC",
+    },
+  );
+  await page.goto(`/schedules/${created.body.schedule.id}/edit`);
+  await expect(page.getByLabel("Subject")).toHaveValue("Existing title");
+  await expect(page.getByRole("textbox", { name: "To" })).toHaveValue(
+    "existing@example.test",
+  );
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveText(
+    "Existing message",
+  );
+  await page.getByLabel("Subject").fill("Edited title");
+  await page.getByRole("button", { name: "Save schedule" }).click();
+  await expect(page).toHaveURL(/\/dashboard\?saved=1/);
+  const reread = await browserRequest<{ schedule: ScheduleRow }>(
+    page,
+    `/api/schedules/${created.body.schedule.id}`,
+  );
+  expect(reread.body.schedule.subject).toBe("Edited title");
+});
+
 test("400 distinct daily recipients produce a personal Gmail limit warning", async ({
   page,
   scenario,

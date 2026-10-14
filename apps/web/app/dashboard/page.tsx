@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import ScheduleList from "../../components/ScheduleList";
 import { configuredRuntime } from "../../lib/runtime";
 import styles from "./page.module.css";
 
@@ -23,7 +24,7 @@ const messages: Record<string, string> = {
 export default async function Dashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ gmail?: string; auth?: string }>;
+  searchParams: Promise<{ gmail?: string; auth?: string; warning?: string }>;
 }) {
   const params = await searchParams;
   const runtime = configuredRuntime();
@@ -66,6 +67,7 @@ export default async function Dashboard({
             Your connection is unavailable right now. Please try again later.
           </p>
         ) : null}
+        {user && connected ? <ScheduleList warning={params.warning} /> : null}
         <section className={styles.card} aria-label="Gmail account">
           {!user ? (
             <>
