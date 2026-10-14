@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { fakeSupabaseUrl, testEncryptionKey } from "./fixtures/auth";
 
 export default defineConfig({
   testDir: ".",
@@ -15,11 +16,27 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  webServer: {
-    command:
-      "pnpm --filter @recurmail/web dev --hostname 127.0.0.1 --port 3100",
-    url: "http://127.0.0.1:3100",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      command: "node fixtures/supabase.mjs",
+      url: `${fakeSupabaseUrl}/health`,
+      reuseExistingServer: false,
+    },
+    {
+      command: "node fixtures/web-server.mjs",
+      url: "http://127.0.0.1:3100",
+      reuseExistingServer: false,
+      timeout: 120_000,
+      env: {
+        APP_URL: "http://127.0.0.1:3100",
+        NEXT_PUBLIC_SUPABASE_URL: fakeSupabaseUrl,
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: "fake-anon-key",
+        SUPABASE_SERVICE_ROLE_KEY: "fake-service-key",
+        GOOGLE_CLIENT_ID: "fake-google-client",
+        GOOGLE_CLIENT_SECRET: "fake-google-secret",
+        TOKEN_ENCRYPTION_KEY: testEncryptionKey,
+        RECURMAIL_TEST_OAUTH_ORIGIN: fakeSupabaseUrl,
+      },
+    },
+  ],
 });
