@@ -45,6 +45,8 @@ jobs:
         run: supabase test db supabase/tests/rls.test.sql
       - name: Run sender database tests
         run: supabase test db supabase/tests/sender.test.sql
+      - name: Run sender recovery database tests
+        run: supabase test db supabase/tests/sender-recovery.test.sql
       - name: Verify concurrent sender claims
         run: bash supabase/tests/sender-concurrency.sh
       - name: Set up Deno
