@@ -1,11 +1,16 @@
 import "server-only";
+import { createAccountHandler } from "./account-flow";
 import { createAuthHandlers, readSession } from "./auth-flow";
 import { createConnectionStore, type PublicConnection } from "./connections";
 import { type Authenticate, createGmailHandlers } from "./gmail-flow";
 import { createGoogleProvider } from "./google";
 import { createScheduleStore } from "./schedule-store";
 import { createScheduleHandlers, scheduleJson } from "./schedules";
-import { createSupabaseAuth, type SignedInUser } from "./supabase-auth";
+import {
+  createSupabaseAdmin,
+  createSupabaseAuth,
+  type SignedInUser,
+} from "./supabase-auth";
 
 type DashboardState =
   | { kind: "signed_out" | "refresh" | "unavailable" }
@@ -38,6 +43,11 @@ export function createRuntime(config: RuntimeConfig) {
     serviceKey: config.serviceKey,
     fetcher: config.fetcher,
   });
+  const admin = createSupabaseAdmin({
+    url: config.supabaseUrl,
+    serviceKey: config.serviceKey,
+    fetcher: config.fetcher,
+  });
   const google = createGoogleProvider({
     clientId: config.googleClientId,
     clientSecret: config.googleClientSecret,
@@ -51,6 +61,14 @@ export function createRuntime(config: RuntimeConfig) {
     return user ? { user, accessToken: session.accessToken } : null;
   };
   return {
+    account: createAccountHandler({
+      origin: config.origin,
+      key: config.key,
+      authenticate,
+      store,
+      google,
+      admin,
+    }),
     ...createGmailHandlers({
       origin: config.origin,
       key: config.key,
@@ -167,6 +185,16 @@ export function configuredRuntime(): ReturnType<typeof createRuntime> | null {
     console.error("[ERROR] runtime_configuration_failed");
     return null;
   }
+}
+
+export async function runAccountRoute(request: Request): Promise<Response> {
+  const runtime = configuredRuntime();
+  if (!runtime)
+    return new Response("Account deletion is unavailable", {
+      status: 503,
+      headers: { "Cache-Control": "no-store" },
+    });
+  return runtime.account(request);
 }
 
 export async function runRoute(

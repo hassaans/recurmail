@@ -214,6 +214,11 @@ export default function RecurringEmailGmailGuide() {
             Gmail is a trademark of Google LLC. RecurMail is not affiliated with
             or endorsed by Google.
           </p>
+          <nav aria-label="Legal">
+            <a href="/privacy">Privacy</a>
+            {" · "}
+            <a href="/terms">Terms</a>
+          </nav>
         </div>
       </footer>
     </>

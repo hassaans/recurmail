@@ -1,0 +1,86 @@
+.page {
+  --rm-bg: #f3faf6;
+  --rm-paper: #fff;
+  --rm-line: #d5e8dd;
+  --rm-ink: #1b1530;
+  --rm-ink-2: #3f3856;
+  --rm-muted: #6e6886;
+  --rm-grape-dark: #5326d1;
+  min-height: 100vh;
+  background: var(--rm-bg);
+  color: var(--rm-ink);
+  font:
+    17px / 1.7 "DM Sans",
+    system-ui,
+    sans-serif;
+}
+.page a {
+  color: var(--rm-grape-dark);
+}
+.header,
+.main,
+.footer {
+  width: min(100% - 40px, 840px);
+  margin: 0 auto;
+}
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px 0;
+}
+.header a:first-child {
+  color: var(--rm-ink);
+  font-weight: 700;
+  text-decoration: none;
+}
+.main {
+  padding: 44px 0 80px;
+}
+.main h1,
+.main h2 {
+  font-family: "Plus Jakarta Sans", "DM Sans", sans-serif;
+  line-height: 1.15;
+}
+.main h1 {
+  font-size: clamp(40px, 6vw, 60px);
+}
+.main h2 {
+  margin-top: 36px;
+  font-size: 25px;
+}
+.main p,
+.main li {
+  color: var(--rm-ink-2);
+}
+.main .eyebrow {
+  color: var(--rm-grape-dark);
+  font-weight: 600;
+}
+.main .updated {
+  color: var(--rm-muted);
+  font-size: 14px;
+}
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 24px 0 40px;
+  border-top: 1px solid var(--rm-line);
+  color: var(--rm-muted);
+  font-size: 14px;
+}
+.footer nav {
+  display: flex;
+  gap: 20px;
+}
+.footer p {
+  margin: 0;
+}
+@media (max-width: 520px) {
+  .main {
+    padding-top: 24px;
+  }
+}

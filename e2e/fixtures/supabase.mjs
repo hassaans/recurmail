@@ -1,4 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
+import {
+  createCipheriv,
+  createHash,
+  randomBytes,
+  randomUUID,
+} from "node:crypto";
 import { createServer } from "node:http";
 
 // Local fake OAuth/Supabase boundary, never loaded by the application.
@@ -60,6 +65,23 @@ function newSchedule(user, status = "active") {
   };
 }
 
+function encryptedToken(token, userId) {
+  const key = Buffer.alloc(32, 7);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(userId));
+  const ciphertext = Buffer.concat([
+    cipher.update(token, "utf8"),
+    cipher.final(),
+  ]);
+  return [
+    "v1",
+    iv.toString("base64url"),
+    cipher.getAuthTag().toString("base64url"),
+    ciphertext.toString("base64url"),
+  ].join(".");
+}
+
 function newScenario() {
   const owner = newUser();
   const connected = newUser();
@@ -92,6 +114,8 @@ function newScenario() {
     ],
     revokedTokens: [],
     exchanges: [],
+    deletedUserIds: new Set(),
+    revokeFails: false,
   };
   scenarios.set(scenario.id, scenario);
   return scenario;
@@ -129,8 +153,15 @@ createServer(async (req, res) => {
   try {
     if (url.pathname === "/health") return reply(200, { ready: true });
     if (url.pathname === "/__test/scenarios" && req.method === "POST") {
-      const { connections, schedules, revokedTokens, exchanges, ...scenario } =
-        newScenario();
+      const {
+        connections,
+        schedules,
+        revokedTokens,
+        exchanges,
+        deletedUserIds,
+        revokeFails,
+        ...scenario
+      } = newScenario();
       return reply(201, scenario);
     }
     if (url.pathname.startsWith("/__test/scenarios/")) {
@@ -139,6 +170,24 @@ createServer(async (req, res) => {
         .split("/");
       const scenario = scenarios.get(id);
       if (!scenario) return reply(404, { error: "unknown test scenario" });
+      if (setup === "account-deletion" && req.method === "POST") {
+        scenario.connections.set(scenario.owner.id, {
+          user_id: scenario.owner.id,
+          google_email: scenario.owner.email,
+          is_workspace: false,
+          status: "connected",
+          connected_at: "2026-10-14",
+          encrypted_refresh_token: encryptedToken(
+            scenario.gmailRefreshToken,
+            scenario.owner.id,
+          ),
+        });
+        return reply(200, { user_id: scenario.owner.id });
+      }
+      if (setup === "revoke-failure" && req.method === "POST") {
+        scenario.revokeFails = true;
+        return reply(200, { revoke_fails: true });
+      }
       if (setup === "schedule-api" && req.method === "POST") {
         // Isolate forecasts for the already-connected personal Gmail account.
         // Keep foreign owner rows so browser tests still exercise owner filtering.
@@ -159,6 +208,7 @@ createServer(async (req, res) => {
         schedules: scenario.schedules,
         revokedTokens: scenario.revokedTokens,
         exchanges: scenario.exchanges,
+        deletedUserIds: [...scenario.deletedUserIds],
       });
     }
     if (url.pathname === "/auth/v1/authorize") {
@@ -279,18 +329,37 @@ createServer(async (req, res) => {
         (candidate) => candidate.gmailRefreshToken === token,
       );
       if (!scenario) return reply(400, { error: "invalid_token" });
+      if (scenario.revokeFails)
+        return reply(503, { error: "provider unavailable" });
       scenario.revokedTokens.push(token);
       return reply(200, {});
     }
     const bearer = req.headers.authorization?.replace(/^Bearer /, "");
     const identity = findUser((user) => user.accessToken === bearer);
     if (url.pathname === "/auth/v1/user")
-      return identity && req.headers.apikey === "fake-anon-key"
+      return identity &&
+        !identity.scenario.deletedUserIds.has(identity.user.id) &&
+        req.headers.apikey === "fake-anon-key"
         ? reply(200, { id: identity.user.id, email: identity.user.email })
         : reply(401, { error: "unauthorized" });
     const service =
       bearer === "fake-service-key" &&
       req.headers.apikey === "fake-service-key";
+    if (
+      url.pathname.startsWith("/auth/v1/admin/users/") &&
+      req.method === "DELETE"
+    ) {
+      if (!service) return reply(401, { error: "service role required" });
+      const userId = url.pathname.slice("/auth/v1/admin/users/".length);
+      const target = findUser((candidate) => candidate.id === userId);
+      if (!target) return reply(404, { error: "unknown user" });
+      target.scenario.deletedUserIds.add(userId);
+      target.scenario.connections.delete(userId);
+      target.scenario.schedules = target.scenario.schedules.filter(
+        (schedule) => schedule.user_id !== userId,
+      );
+      return reply(200, { id: userId });
+    }
     if (url.pathname === "/rest/v1/schedules" && !service) {
       if (!identity || req.headers.apikey !== "fake-anon-key")
         return reply(401, { error: "unauthorized" });
