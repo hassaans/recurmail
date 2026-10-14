@@ -1,6 +1,7 @@
 import { decryptRefreshToken } from "./crypto.ts";
 import { type ClaimedSchedule, runSender, type SenderStore } from "./engine.ts";
 import { GmailError } from "./gmail.ts";
+import { createStore } from "./store.ts";
 
 Deno.chdir(new URL("../../..", import.meta.url));
 
@@ -11,10 +12,86 @@ function assert(condition: unknown, message: string): asserts condition {
 function equal(actual: unknown, expected: unknown, message: string): void {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(
-      `${message}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+      `${message}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(
+        actual,
+      )}`,
     );
   }
 }
+
+Deno.test("Supabase service requests send the secret key only as apikey", async () => {
+  const secretKey = "sb_secret_test-key";
+  const requests: { url: string; headers: Headers }[] = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    requests.push({
+      url: String(input),
+      headers: new Headers(init?.headers),
+    });
+    if (String(input).endsWith("/rpc/get_admin_metrics")) {
+      return Response.json({
+        failed_last_hour: 1,
+        attempted_last_hour: 2,
+        failure_rate_last_hour: 0.5,
+      });
+    }
+    return Response.json([]);
+  };
+  const store = createStore("https://db.example.test", secretKey, fetcher);
+  await store.failureMetrics?.();
+  await store.claim(1);
+  await store.claimReconnectNotices(1);
+  await store.markReconnectNoticeSent("notice-1");
+  await store.markReconnectNoticeFailed("notice-1", "send_failed");
+  await store.reclaimStaleSending("2026-10-14T00:00:00.000Z");
+  await store.recordFailure({
+    scheduleId: "schedule-1",
+    scheduledFor: "2026-10-14T00:00:00.000Z",
+    errorCode: "send_failed",
+  });
+  await store.complete({
+    scheduleId: "schedule-1",
+    scheduledFor: "2026-10-14T00:00:00.000Z",
+    status: "sent",
+    nextSendAt: "2026-10-15T00:00:00.000Z",
+  });
+  await store.reconnect({
+    scheduleId: "schedule-1",
+    userId: "user-1",
+    scheduledFor: "2026-10-14T00:00:00.000Z",
+    recipient: "user@example.test",
+    reconnectUrl: "https://app.example.test/connect",
+  });
+  await store.heartbeat({
+    id: "heartbeat-1",
+    startedAt: "2026-10-14T00:00:00.000Z",
+    finishedAt: "2026-10-14T00:00:01.000Z",
+    claimed: 0,
+    sent: 0,
+    failed: 0,
+    deferred: 0,
+    noticesSent: 0,
+    noticesFailed: 0,
+    failureRateLastHour: null,
+    failedLastHour: null,
+    attemptedLastHour: null,
+  });
+
+  equal(requests.length, 10, "service request count");
+  for (const request of requests) {
+    const expected = request.url.endsWith("/sender_heartbeats")
+      ? {
+          apikey: secretKey,
+          "content-type": "application/json",
+          prefer: "return=minimal",
+        }
+      : { apikey: secretKey, "content-type": "application/json" };
+    equal(Object.fromEntries(request.headers), expected, "service headers");
+    assert(
+      !request.headers.has("authorization"),
+      "service request must not send Authorization",
+    );
+  }
+});
 
 async function nodeEncryptedToken(): Promise<{
   envelope: string;
@@ -23,7 +100,9 @@ async function nodeEncryptedToken(): Promise<{
 }> {
   const owner = "user-interop-1";
   const key = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
-  const script = `import { encryptRefreshToken } from './apps/web/lib/crypto.ts'; console.log(encryptRefreshToken('refresh-token-from-node', ${JSON.stringify(key)}, ${JSON.stringify(owner)}));`;
+  const script = `import { encryptRefreshToken } from './apps/web/lib/crypto.ts'; console.log(encryptRefreshToken('refresh-token-from-node', ${JSON.stringify(
+    key,
+  )}, ${JSON.stringify(owner)}));`;
   const child = new Deno.Command("node", {
     args: [
       "--experimental-strip-types",
@@ -136,8 +215,9 @@ async function fakeGoogleServer(
     async (request) => {
       requests.push(request.clone());
       if (new URL(request.url).pathname === "/token") {
-        if (tokenError)
+        if (tokenError) {
           return Response.json({ error: tokenError }, { status: 400 });
+        }
         return Response.json({
           access_token: "fake-access",
           expires_in: 3600,
@@ -147,7 +227,7 @@ async function fakeGoogleServer(
       if (
         new URL(request.url).pathname === "/gmail/v1/users/me/messages/send"
       ) {
-        if (gmailStatus !== 200)
+        if (gmailStatus !== 200) {
           return Response.json(
             {
               error: {
@@ -164,6 +244,7 @@ async function fakeGoogleServer(
             },
             { status: gmailStatus },
           );
+        }
         return Response.json({ id: "fake-message-id" });
       }
       return new Response("not found", { status: 404 });
@@ -248,7 +329,11 @@ Deno.test("Gmail 429 defers one hour without pausing the schedule", async () => 
           : input.url,
     );
     return fetch(
-      `${fake.url}${original.pathname === "/token" ? "/token" : "/gmail/v1/users/me/messages/send"}`,
+      `${fake.url}${
+        original.pathname === "/token"
+          ? "/token"
+          : "/gmail/v1/users/me/messages/send"
+      }`,
       init,
     );
   };
@@ -293,7 +378,11 @@ Deno.test("invalid_grant pauses through the reconnect outbox", async () => {
           : input.url,
     );
     return fetch(
-      `${fake.url}${original.pathname === "/token" ? "/token" : "/gmail/v1/users/me/messages/send"}`,
+      `${fake.url}${
+        original.pathname === "/token"
+          ? "/token"
+          : "/gmail/v1/users/me/messages/send"
+      }`,
       init,
     );
   };
@@ -361,7 +450,11 @@ Deno.test("Gmail 5xx send outcomes are failed and never retried", async () => {
           : input.url,
     );
     return fetch(
-      `${fake.url}${original.pathname === "/token" ? "/token" : "/gmail/v1/users/me/messages/send"}`,
+      `${fake.url}${
+        original.pathname === "/token"
+          ? "/token"
+          : "/gmail/v1/users/me/messages/send"
+      }`,
       init,
     );
   };
@@ -403,8 +496,9 @@ Deno.test("Gmail send timeouts are failed and never retried", async () => {
           ? input.href
           : input.url,
     );
-    if (url.pathname === "/token")
+    if (url.pathname === "/token") {
       return Response.json({ access_token: "fake-access" });
+    }
     gmailPosts += 1;
     assert(
       typeof init?.body === "string",
@@ -479,8 +573,9 @@ Deno.test("one completion store failure does not stop later schedules or heartbe
   ];
   const store = recordingStore(schedules);
   store.complete = async (value) => {
-    if (value.scheduleId === "schedule-1")
+    if (value.scheduleId === "schedule-1") {
       throw new Error("database connection dropped");
+    }
     store.completed.push(value);
   };
   let messageNumber = 0;
@@ -539,8 +634,9 @@ Deno.test("a reconnect store failure does not stop later schedules or heartbeat"
   const store = recordingStore(schedules);
   store.reconnect = async (value) => {
     store.reconnects.push(value);
-    if (value.scheduleId === "schedule-1")
+    if (value.scheduleId === "schedule-1") {
       throw new Error("outbox database connection dropped");
+    }
   };
   let sends = 0;
   const result = await runSender(store, {
@@ -586,8 +682,9 @@ Deno.test("post-send DB failure is logged and a later run reclaims without resen
   store.reclaimStaleSending = async () => (allowRecovery ? [stale] : []);
   store.claim = async () => (allowRecovery ? [] : [stale]);
   store.complete = async (value) => {
-    if (value.status === "sent")
+    if (value.status === "sent") {
       throw new Error("database write failed after Gmail accepted");
+    }
     store.completed.push(value);
   };
   let sends = 0;

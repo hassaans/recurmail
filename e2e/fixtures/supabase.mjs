@@ -261,7 +261,7 @@ createServer(async (req, res) => {
       return redirect(callback);
     }
     if (url.pathname === "/auth/v1/token" && req.method === "POST") {
-      if (req.headers.apikey !== "fake-anon-key")
+      if (req.headers.apikey !== "fake-publishable-key")
         return reply(401, { error: "invalid API key" });
       const data = JSON.parse(await body(req));
       let user;
@@ -361,12 +361,11 @@ createServer(async (req, res) => {
     if (url.pathname === "/auth/v1/user")
       return identity &&
         !identity.scenario.deletedUserIds.has(identity.user.id) &&
-        req.headers.apikey === "fake-anon-key"
+        req.headers.apikey === "fake-publishable-key"
         ? reply(200, { id: identity.user.id, email: identity.user.email })
         : reply(401, { error: "unauthorized" });
     const service =
-      bearer === "fake-service-key" &&
-      req.headers.apikey === "fake-service-key";
+      req.headers.apikey === "fake-secret-key" && !req.headers.authorization;
     if (
       url.pathname.startsWith("/auth/v1/admin/users/") &&
       req.method === "DELETE"
@@ -386,7 +385,7 @@ createServer(async (req, res) => {
       return reply(200, { id: userId });
     }
     if (url.pathname === "/rest/v1/schedules" && !service) {
-      if (!identity || req.headers.apikey !== "fake-anon-key")
+      if (!identity || req.headers.apikey !== "fake-publishable-key")
         return reply(401, { error: "unauthorized" });
       if (req.method === "POST") {
         if (
@@ -501,7 +500,7 @@ createServer(async (req, res) => {
       req.method === "GET" &&
       !service
     ) {
-      if (!identity || req.headers.apikey !== "fake-anon-key")
+      if (!identity || req.headers.apikey !== "fake-publishable-key")
         return reply(401, { error: "unauthorized" });
       if (
         url.searchParams.get("user_id") !== `eq.${identity.user.id}` ||
@@ -554,7 +553,7 @@ createServer(async (req, res) => {
       }
     }
     if (url.pathname === "/rest/v1/send_log" && req.method === "GET") {
-      if (!identity || req.headers.apikey !== "fake-anon-key") {
+      if (!identity || req.headers.apikey !== "fake-publishable-key") {
         return reply(401, { error: "unauthorized" });
       }
       if (url.searchParams.get("user_id") !== `eq.${identity.user.id}`)

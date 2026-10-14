@@ -23,8 +23,8 @@ export interface ConnectionStore {
 
 export function createConnectionStore(config: {
   url: string;
-  anonKey: string;
-  serviceKey: string;
+  publishableKey: string;
+  secretKey: string;
   fetcher?: typeof fetch;
 }): ConnectionStore {
   const fetcher = config.fetcher ?? fetch;
@@ -32,7 +32,7 @@ export function createConnectionStore(config: {
     table: string,
     params: Record<string, string>,
     method: string,
-    accessToken: string,
+    accessToken: string | undefined,
     service: boolean,
     body?: object,
   ) {
@@ -41,8 +41,8 @@ export function createConnectionStore(config: {
     const response = await fetcher(url.toString(), {
       method,
       headers: {
-        apikey: service ? config.serviceKey : config.anonKey,
-        Authorization: `Bearer ${accessToken}`,
+        apikey: service ? config.secretKey : config.publishableKey,
+        ...(!service ? { Authorization: `Bearer ${accessToken}` } : {}),
         "Content-Type": "application/json",
         Prefer:
           method === "POST"
@@ -84,7 +84,7 @@ export function createConnectionStore(config: {
         "gmail_connections",
         { user_id: `eq.${userId}`, select: "encrypted_refresh_token" },
         "GET",
-        config.serviceKey,
+        undefined,
         true,
       );
       const [row] = await response.json();
@@ -95,7 +95,7 @@ export function createConnectionStore(config: {
         "gmail_connections",
         { on_conflict: "user_id" },
         "POST",
-        config.serviceKey,
+        undefined,
         true,
         connection,
       );
@@ -105,7 +105,7 @@ export function createConnectionStore(config: {
         "schedules",
         { user_id: `eq.${userId}` },
         "PATCH",
-        config.serviceKey,
+        undefined,
         true,
         { status: "paused", updated_at: new Date().toISOString() },
       );
@@ -115,7 +115,7 @@ export function createConnectionStore(config: {
         "gmail_connections",
         { user_id: `eq.${userId}` },
         "DELETE",
-        config.serviceKey,
+        undefined,
         true,
       );
     },

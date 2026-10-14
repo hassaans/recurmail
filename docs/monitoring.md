@@ -8,6 +8,14 @@ Set `SENTRY_CRON_MONITOR_SLUG=send-due-every-minute` in `send-due`. Each invocat
 
 ## Cron monitor
 
+The pg_cron jobs require only these Vault secrets:
+
+- `project_url`: the Supabase project URL.
+- `sender_cron_secret`: the shared secret checked by the `send-due` function.
+
+The jobs send these values as `Content-Type` and
+`x-recurmail-cron-secret` headers. They do not store or send a Supabase API key.
+
 Create this monitor in the Sentry project that receives the web DSN before deploying with Sentry enabled.
 
 - Slug is `send-due-every-minute`.

@@ -15,7 +15,7 @@ export interface SupabaseAdmin {
 
 export function createSupabaseAdmin(config: {
   url: string;
-  serviceKey: string;
+  secretKey: string;
   fetcher?: typeof fetch;
 }): SupabaseAdmin {
   const fetcher = config.fetcher ?? fetch;
@@ -26,8 +26,7 @@ export function createSupabaseAdmin(config: {
         {
           method: "DELETE",
           headers: {
-            apikey: config.serviceKey,
-            Authorization: "Bearer " + config.serviceKey,
+            apikey: config.secretKey,
           },
           cache: "no-store",
         },
@@ -46,7 +45,7 @@ export interface SupabaseAuth {
 
 export function createSupabaseAuth(config: {
   url: string;
-  anonKey: string;
+  publishableKey: string;
   fetcher?: typeof fetch;
   now?: () => number;
 }): SupabaseAuth {
@@ -57,7 +56,10 @@ export function createSupabaseAuth(config: {
       `${config.url}/auth/v1/token?grant_type=${grant}`,
       {
         method: "POST",
-        headers: { apikey: config.anonKey, "Content-Type": "application/json" },
+        headers: {
+          apikey: config.publishableKey,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(body),
         cache: "no-store",
       },
@@ -99,7 +101,7 @@ export function createSupabaseAuth(config: {
     async getUser(accessToken) {
       const response = await fetcher(`${config.url}/auth/v1/user`, {
         headers: {
-          apikey: config.anonKey,
+          apikey: config.publishableKey,
           Authorization: `Bearer ${accessToken}`,
         },
         cache: "no-store",

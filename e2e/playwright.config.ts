@@ -31,8 +31,8 @@ export default defineConfig({
       env: {
         APP_URL: "http://127.0.0.1:3100",
         NEXT_PUBLIC_SUPABASE_URL: fakeSupabaseUrl,
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: "fake-anon-key",
-        SUPABASE_SERVICE_ROLE_KEY: "fake-service-key",
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "fake-publishable-key",
+        SUPABASE_SECRET_KEY: "fake-secret-key",
         GOOGLE_CLIENT_ID: "fake-google-client",
         GOOGLE_CLIENT_SECRET: "fake-google-secret",
         TOKEN_ENCRYPTION_KEY: testEncryptionKey,

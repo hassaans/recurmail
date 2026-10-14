@@ -20,7 +20,10 @@ const request = (path: string, cookie?: string) =>
   });
 function fixture() {
   const auth = {
-    ...createSupabaseAuth({ url: "https://db.test", anonKey: "fake-anon" }),
+    ...createSupabaseAuth({
+      url: "https://db.test",
+      publishableKey: "fake-publishable",
+    }),
     exchangeCode: vi.fn(async () => ({
       accessToken: "fake-access",
       refreshToken: "fake-session-refresh",

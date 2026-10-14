@@ -1,7 +1,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(22);
+select plan(24);
 
 create temporary table sender_metrics_baseline on commit preserve rows as
 select
@@ -27,6 +27,8 @@ select ok(pg_get_functiondef('public.claim_due_schedules(integer)'::regprocedure
 select is(has_function_privilege('anon', 'public.get_admin_metrics()', 'EXECUTE'), false, 'anon cannot read admin metrics');
 select is(has_function_privilege('authenticated', 'public.get_admin_metrics()', 'EXECUTE'), false, 'signed-in users cannot read admin metrics');
 select is(has_function_privilege('service_role', 'public.get_admin_metrics()', 'EXECUTE'), true, 'service role can read admin metrics');
+select ok((select count(*) = 2 from cron.job where jobname in ('recurmail-send-due-every-minute', 'recurmail-daily-keepalive')), 'both send-due cron jobs are installed');
+select ok(not exists (select 1 from cron.job where command ilike '%service_role_key%' or command ilike '%Authorization%'), 'cron commands do not store an API key or Authorization header');
 select is((select schedule_id from public.claim_due_schedules(1)), '10000000-0000-4000-8000-000000000006'::uuid, 'first claim takes the earliest due schedule');
 select is((select schedule_id from public.claim_due_schedules(1)), '10000000-0000-4000-8000-000000000007'::uuid, 'second claim takes the next due schedule');
 select is((select count(*) from public.claim_due_schedules(1)), 1::bigint, 'third claim gets the remaining schedule');

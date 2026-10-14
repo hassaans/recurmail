@@ -23,8 +23,8 @@ interface RuntimeConfig {
   origin: string;
   key: string;
   supabaseUrl: string;
-  anonKey: string;
-  serviceKey: string;
+  publishableKey: string;
+  secretKey: string;
   googleClientId: string;
   googleClientSecret: string;
   testOAuthOrigin?: string;
@@ -34,18 +34,18 @@ interface RuntimeConfig {
 export function createRuntime(config: RuntimeConfig) {
   const auth = createSupabaseAuth({
     url: config.supabaseUrl,
-    anonKey: config.anonKey,
+    publishableKey: config.publishableKey,
     fetcher: config.fetcher,
   });
   const store = createConnectionStore({
     url: config.supabaseUrl,
-    anonKey: config.anonKey,
-    serviceKey: config.serviceKey,
+    publishableKey: config.publishableKey,
+    secretKey: config.secretKey,
     fetcher: config.fetcher,
   });
   const admin = createSupabaseAdmin({
     url: config.supabaseUrl,
-    serviceKey: config.serviceKey,
+    secretKey: config.secretKey,
     fetcher: config.fetcher,
   });
   const google = createGoogleProvider({
@@ -82,7 +82,7 @@ export function createRuntime(config: RuntimeConfig) {
       authenticate,
       store: createScheduleStore({
         url: config.supabaseUrl,
-        anonKey: config.anonKey,
+        publishableKey: config.publishableKey,
         fetcher: config.fetcher,
       }),
     }),
@@ -154,8 +154,8 @@ export function configuredRuntime(): ReturnType<typeof createRuntime> | null {
   if (
     !env.APP_URL ||
     !env.NEXT_PUBLIC_SUPABASE_URL ||
-    !env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    !env.SUPABASE_SERVICE_ROLE_KEY ||
+    !env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    !env.SUPABASE_SECRET_KEY ||
     !env.GOOGLE_CLIENT_ID ||
     !env.GOOGLE_CLIENT_SECRET ||
     !env.TOKEN_ENCRYPTION_KEY
@@ -175,8 +175,8 @@ export function configuredRuntime(): ReturnType<typeof createRuntime> | null {
       origin: app.origin,
       key: env.TOKEN_ENCRYPTION_KEY,
       supabaseUrl: new URL(env.NEXT_PUBLIC_SUPABASE_URL).origin,
-      anonKey: env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      serviceKey: env.SUPABASE_SERVICE_ROLE_KEY,
+      publishableKey: env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+      secretKey: env.SUPABASE_SECRET_KEY,
       googleClientId: env.GOOGLE_CLIENT_ID,
       googleClientSecret: env.GOOGLE_CLIENT_SECRET,
       testOAuthOrigin: env.RECURMAIL_TEST_OAUTH_ORIGIN,

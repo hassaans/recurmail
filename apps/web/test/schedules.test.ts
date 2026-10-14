@@ -193,7 +193,7 @@ describe("Supabase schedule insert request", () => {
     const fetcher = vi.fn().mockResolvedValue(Response.json([saved]));
     const store = createScheduleStore({
       url: "https://db.test",
-      anonKey: "fake-anon",
+      publishableKey: "fake-publishable",
       fetcher,
     });
 
@@ -208,9 +208,10 @@ describe("Supabase schedule insert request", () => {
     );
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body)).toEqual(body);
-    expect(init.headers).toMatchObject({
-      apikey: "fake-anon",
+    expect(init.headers).toEqual({
+      apikey: "fake-publishable",
       Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
       Prefer: "return=representation",
     });
   });

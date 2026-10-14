@@ -471,7 +471,7 @@ test("pausing persists across reads and excludes the schedule from active result
   const activeRows = async () => {
     const response = await request.get(`${fakeSupabaseUrl}/rest/v1/schedules`, {
       headers: {
-        apikey: "fake-anon-key",
+        apikey: "fake-publishable-key",
         Authorization: `Bearer ${scenario.connected.accessToken}`,
       },
       params: {

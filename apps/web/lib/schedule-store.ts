@@ -62,7 +62,7 @@ export class ScheduleStorageError extends Error {
 /** All operations use the caller's JWT, the anon API key and existing owner RLS. */
 export function createScheduleStore(config: {
   url: string;
-  anonKey: string;
+  publishableKey: string;
   fetcher?: typeof fetch;
 }): ScheduleStore {
   const fetcher = config.fetcher ?? fetch;
@@ -79,7 +79,7 @@ export function createScheduleStore(config: {
     const response = await fetcher(url.toString(), {
       method,
       headers: {
-        apikey: config.anonKey,
+        apikey: config.publishableKey,
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
         Prefer: "return=representation",
