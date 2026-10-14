@@ -109,6 +109,34 @@ describe("dailyLimitCheck", () => {
     });
   });
 
+  it("warns for 450 Gmail recipients in one rolling window", () => {
+    const result = dailyLimitCheck(
+      [once("20260701T090000Z", 200), once("20260701T120000Z", 250)],
+      "gmail.com",
+      now,
+    );
+    expect(result).toMatchObject({
+      count: 450,
+      status: "warn",
+      limit: 500,
+      window: { start: new Date("2026-07-01T09:00:00Z"), occurrenceCount: 2 },
+    });
+  });
+
+  it("allows 600 Workspace recipients in one rolling window", () => {
+    const result = dailyLimitCheck(
+      [once("20260701T090000Z", 300), once("20260701T120000Z", 300)],
+      "workspace",
+      now,
+    );
+    expect(result).toMatchObject({
+      count: 600,
+      status: "ok",
+      limit: 2000,
+      window: { start: new Date("2026-07-01T09:00:00Z"), occurrenceCount: 2 },
+    });
+  });
+
   it("counts To, Cc, and Bcc entries on every occurrence, including duplicates", () => {
     const result = dailyLimitCheck(
       [
@@ -138,8 +166,10 @@ describe("dailyLimitCheck", () => {
     ["googlemail.com", 500, 500, "warn"],
     ["googlemail.com", 501, 500, "over"],
     ["workspace", 399, 2000, "ok"],
-    ["workspace", 400, 2000, "warn"],
-    ["workspace", 501, 2000, "warn"],
+    ["workspace", 400, 2000, "ok"],
+    ["workspace", 501, 2000, "ok"],
+    ["workspace", 1599, 2000, "ok"],
+    ["workspace", 1600, 2000, "warn"],
     ["workspace", 2000, 2000, "warn"],
     ["workspace", 2001, 2000, "over"],
   ])(

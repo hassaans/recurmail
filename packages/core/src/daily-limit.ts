@@ -31,7 +31,8 @@ const DAY_MS = 86_400_000;
 /**
  * Forecast active schedules over [now, now + 30 elapsed days]. Rolling windows
  * are [start, start + 24 hours), so sends exactly 24 hours apart do not overlap.
- * Count every To/Cc/Bcc entry per send, including duplicate addresses.
+ * Warn at 80% of the account cap; count every To/Cc/Bcc entry per send,
+ * including duplicate addresses.
  */
 export function dailyLimitCheck(
   schedules: readonly LimitSchedule[],
@@ -97,8 +98,9 @@ export function dailyLimitCheck(
     }
     running -= occurrences[left].recipients;
   }
+  const warningThreshold = Math.floor(limit * 0.8);
   return {
-    status: count > limit ? "over" : count >= 400 ? "warn" : "ok",
+    status: count > limit ? "over" : count >= warningThreshold ? "warn" : "ok",
     count,
     limit,
     window,
