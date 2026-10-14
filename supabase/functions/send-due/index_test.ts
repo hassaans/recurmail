@@ -438,15 +438,19 @@ Deno.test("stale claims are failed and advanced without another Gmail send", asy
     },
   });
   equal(sends, 0, "a stale claim is not sent again");
-  equal(store.completed, [
-    {
-      scheduleId: "schedule-1",
-      scheduledFor: "2026-10-14T17:00:00.000Z",
-      status: "failed",
-      nextSendAt: "2026-10-15T17:00:00.000Z",
-      errorCode: "claim_expired",
-    },
-  ], "stale occurrence is failed and advanced");
+  equal(
+    store.completed,
+    [
+      {
+        scheduleId: "schedule-1",
+        scheduledFor: "2026-10-14T17:00:00.000Z",
+        status: "failed",
+        nextSendAt: "2026-10-15T17:00:00.000Z",
+        errorCode: "claim_expired",
+      },
+    ],
+    "stale occurrence is failed and advanced",
+  );
   equal(result.failed, 1, "stale claim is counted as failed");
   equal(store.heartbeats.length, 1, "recovery writes a heartbeat");
 });
@@ -464,27 +468,85 @@ Deno.test("one completion store failure does not stop later schedules or heartbe
       throw new Error("database connection dropped");
     store.completed.push(value);
   };
+  let messageNumber = 0;
   const result = await runSender(store, {
     key,
     clientId: "fake",
     clientSecret: "fake",
     appUrl: "https://recurmail.example.test",
-    send: async (schedule) => `message-${schedule.schedule_id}`,
+    send: async () => {
+      messageNumber += 1;
+      return `message-${messageNumber}`;
+    },
   });
-  equal(result, { claimed: 3, sent: 2, failed: 1, deferred: 0 }, "batch totals");
+  equal(
+    result,
+    { claimed: 3, sent: 2, failed: 1, deferred: 0 },
+    "batch totals",
+  );
   equal(
     store.completed.map((row) => (row as { scheduleId: string }).scheduleId),
     ["schedule-2", "schedule-3"],
     "later schedules are completed after the first store failure",
   );
-  equal(store.failureLogs, [
-    {
-      scheduleId: "schedule-1",
-      scheduledFor: "2026-10-14T17:00:00.000Z",
-      errorCode: "post_send_store_failed",
+  equal(
+    store.failureLogs,
+    [
+      {
+        scheduleId: "schedule-1",
+        scheduledFor: "2026-10-14T17:00:00.000Z",
+        errorCode: "post_send_store_failed",
+      },
+    ],
+    "the accepted message is logged with its distinct store failure code",
+  );
+  equal(
+    store.heartbeats.length,
+    1,
+    "heartbeat is written despite a store failure",
+  );
+});
+
+Deno.test("a reconnect store failure does not stop later schedules or heartbeat", async () => {
+  const { envelope, key } = await nodeEncryptedToken();
+  const schedules = [
+    dueSchedule(envelope),
+    { ...dueSchedule(envelope), schedule_id: "schedule-2" },
+    { ...dueSchedule(envelope), schedule_id: "schedule-3" },
+  ];
+  const store = recordingStore(schedules);
+  store.reconnect = async (value) => {
+    store.reconnects.push(value);
+    if (value.scheduleId === "schedule-1")
+      throw new Error("outbox database connection dropped");
+  };
+  let sends = 0;
+  const result = await runSender(store, {
+    key,
+    clientId: "fake",
+    clientSecret: "fake",
+    appUrl: "https://recurmail.example.test",
+    send: async () => {
+      sends += 1;
+      throw new GmailError("invalid_grant", "invalid_grant");
     },
-  ], "the accepted message is logged with its distinct store failure code");
-  equal(store.heartbeats.length, 1, "heartbeat is written despite a store failure");
+  });
+  equal(
+    result,
+    { claimed: 3, sent: 0, failed: 3, deferred: 0 },
+    "reconnect batch totals",
+  );
+  equal(sends, 1, "the disconnected account is not sent again");
+  equal(
+    store.reconnects.length,
+    3,
+    "the batch continues processing reconnect rows",
+  );
+  equal(
+    store.heartbeats.length,
+    1,
+    "heartbeat is written after reconnect store failure",
+  );
 });
 
 Deno.test("post-send DB failure is logged and a later run reclaims without resending", async () => {
@@ -492,10 +554,11 @@ Deno.test("post-send DB failure is logged and a later run reclaims without resen
   const stale = dueSchedule(envelope);
   const store = recordingStore([stale]);
   let allowRecovery = false;
-  store.reclaimStaleSending = async () => allowRecovery ? [stale] : [];
-  store.claim = async () => allowRecovery ? [] : [stale];
+  store.reclaimStaleSending = async () => (allowRecovery ? [stale] : []);
+  store.claim = async () => (allowRecovery ? [] : [stale]);
   store.complete = async (value) => {
-    if (value.status === "sent") throw new Error("database write failed after Gmail accepted");
+    if (value.status === "sent")
+      throw new Error("database write failed after Gmail accepted");
     store.completed.push(value);
   };
   let sends = 0;
@@ -510,11 +573,15 @@ Deno.test("post-send DB failure is logged and a later run reclaims without resen
     },
   });
   equal(first.failed, 1, "post-send DB failure is counted as failed");
-  equal(store.failureLogs[0], {
-    scheduleId: "schedule-1",
-    scheduledFor: "2026-10-14T17:00:00.000Z",
-    errorCode: "post_send_store_failed",
-  }, "post-send failure keeps a distinct log code");
+  equal(
+    store.failureLogs[0],
+    {
+      scheduleId: "schedule-1",
+      scheduledFor: "2026-10-14T17:00:00.000Z",
+      errorCode: "post_send_store_failed",
+    },
+    "post-send failure keeps a distinct log code",
+  );
 
   allowRecovery = true;
   store.completed.length = 0;
@@ -531,11 +598,15 @@ Deno.test("post-send DB failure is logged and a later run reclaims without resen
   });
   equal(sends, 1, "a recovered accepted message is never sent again");
   equal(second.failed, 1, "recovery accounts for the unknown outcome");
-  equal(store.completed[0], {
-    scheduleId: "schedule-1",
-    scheduledFor: "2026-10-14T17:00:00.000Z",
-    status: "failed",
-    nextSendAt: "2026-10-15T17:00:00.000Z",
-    errorCode: "claim_expired",
-  }, "the later run advances the still-sending schedule");
+  equal(
+    store.completed[0],
+    {
+      scheduleId: "schedule-1",
+      scheduledFor: "2026-10-14T17:00:00.000Z",
+      status: "failed",
+      nextSendAt: "2026-10-15T17:00:00.000Z",
+      errorCode: "claim_expired",
+    },
+    "the later run advances the still-sending schedule",
+  );
 });

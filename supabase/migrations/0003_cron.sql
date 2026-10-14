@@ -143,7 +143,7 @@ grant execute on function public.claim_due_schedules(integer) to service_role;
 grant execute on function public.complete_due_schedule(uuid, timestamptz, text, timestamptz, text, text) to service_role;
 grant execute on function public.mark_gmail_reconnect_needed(uuid, uuid, timestamptz, text, text) to service_role;
 
--- Set Vault secrets named project_url and service_role_key before enabling delivery.
+-- Set Vault secrets named project_url, service_role_key, and sender_cron_secret before enabling delivery.
 -- The same daily job deliberately invokes the DB-writing function so Free projects
 -- receive a predictable API-backed database write even if pg_cron itself is not
 -- counted as user activity by the platform's inactivity detector.
@@ -156,7 +156,8 @@ select cron.schedule(
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
         'apikey', (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key'),
-        'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key')
+        'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key'),
+        'x-recurmail-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'sender_cron_secret')
       ),
       body := jsonb_build_object('source', 'pg_cron')
     );
@@ -172,7 +173,8 @@ select cron.schedule(
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
         'apikey', (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key'),
-        'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key')
+        'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key'),
+        'x-recurmail-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'sender_cron_secret')
       ),
       body := jsonb_build_object('source', 'daily_keepalive')
     );

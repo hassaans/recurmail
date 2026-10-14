@@ -1,10 +1,14 @@
 {
   "version": "5",
   "specifiers": {
+    "npm:@types/luxon@3.7.6": "3.7.6",
     "npm:luxon@3.7.2": "3.7.2",
     "npm:rrule@2.8.1": "2.8.1"
   },
   "npm": {
+    "@types/luxon@3.7.6": {
+      "integrity": "sha512-6KSjliQAXK8ZLgFQO4B7iE4Rpf/B3rItzCFuXezBY/XIAGxOdLd7vRNK9/StRPwiS/yJsVbB7HKpW46B8tcEuQ=="
+    },
     "luxon@3.7.2": {
       "integrity": "sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew=="
     },

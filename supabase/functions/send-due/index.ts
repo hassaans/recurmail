@@ -1,6 +1,7 @@
 /// <reference types="npm:@types/luxon@3.7.6" />
 
 import { runSender, type SenderStore } from "./engine.ts";
+import { createSenderHandler } from "./handler.ts";
 
 const required = (name: string): string => {
   const value = Deno.env.get(name)?.trim();
@@ -29,6 +30,15 @@ function createStore(url: string, serviceKey: string): SenderStore {
   }
   return {
     claim: (limit) => rpc("claim_due_schedules", { p_limit: limit }),
+    reclaimStaleSending: (olderThan) =>
+      rpc("reclaim_stale_sending", { p_older_than: olderThan }),
+    recordFailure: async (input) => {
+      await rpc("record_sender_failure", {
+        p_schedule_id: input.scheduleId,
+        p_scheduled_for: input.scheduledFor,
+        p_error_code: input.errorCode,
+      });
+    },
     complete: async (input) => {
       await rpc("complete_due_schedule", {
         p_schedule_id: input.scheduleId,
@@ -75,25 +85,21 @@ function createStore(url: string, serviceKey: string): SenderStore {
   };
 }
 
-Deno.serve(async (request) => {
-  if (request.method !== "POST")
-    return new Response("Method not allowed", { status: 405 });
-  try {
-    const result = await runSender(
-      createStore(
-        required("SUPABASE_URL"),
-        required("SUPABASE_SERVICE_ROLE_KEY"),
+Deno.serve(
+  createSenderHandler({
+    getCronSecret: () => Deno.env.get("SENDER_CRON_SECRET"),
+    execute: () =>
+      runSender(
+        createStore(
+          required("SUPABASE_URL"),
+          required("SUPABASE_SERVICE_ROLE_KEY"),
+        ),
+        {
+          key: required("TOKEN_ENCRYPTION_KEY"),
+          clientId: required("GOOGLE_CLIENT_ID"),
+          clientSecret: required("GOOGLE_CLIENT_SECRET"),
+          appUrl: required("APP_URL"),
+        },
       ),
-      {
-        key: required("TOKEN_ENCRYPTION_KEY"),
-        clientId: required("GOOGLE_CLIENT_ID"),
-        clientSecret: required("GOOGLE_CLIENT_SECRET"),
-        appUrl: required("APP_URL"),
-      },
-    );
-    return Response.json(result);
-  } catch (error) {
-    console.error("send-due failed", error);
-    return Response.json({ error: "sender_failed" }, { status: 500 });
-  }
-});
+  }),
+);
