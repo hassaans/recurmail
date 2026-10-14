@@ -21,7 +21,7 @@ begin;
 select ok(pg_get_functiondef('public.claim_due_schedules(integer)'::regprocedure) ilike '%skip locked%', 'claim function uses SKIP LOCKED');
 select extensions.dblink_connect(
   'sender_concurrency',
-  'host=/var/run/postgresql dbname=postgres user=postgres password=local-test-only'
+  'dbname=postgres'
 );
 select extensions.dblink_exec('sender_concurrency', 'begin');
 select is(
@@ -85,5 +85,5 @@ select is((select count(*) from public.sender_heartbeats where claimed_count = 3
 select extensions.dblink_disconnect('sender_concurrency');
 delete from auth.users where id = '00000000-0000-4000-8000-000000000006';
 delete from public.sender_heartbeats where id = '30000000-0000-4000-8000-000000000006';
-select * from finish();
+select * from finish(true);
 commit;
