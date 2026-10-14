@@ -9,6 +9,26 @@ import { describe, expect, it, vi } from "vitest";
 import ScheduleEditor from "../components/ScheduleEditor";
 import ScheduleList from "../components/ScheduleList";
 
+type HasFunction<T> = T extends (...args: never[]) => unknown
+  ? true
+  : T extends readonly (infer Item)[]
+    ? HasFunction<Item>
+    : T extends object
+      ? true extends {
+          [Key in keyof T]-?: HasFunction<T[Key]>;
+        }[keyof T]
+        ? true
+        : false
+      : false;
+type Assert<T extends true> = T;
+
+type ScheduleEditorPropsAreDataOnly = Assert<
+  HasFunction<ComponentProps<typeof ScheduleEditor>> extends false ? true : false
+>;
+type ScheduleListPropsAreDataOnly = Assert<
+  HasFunction<ComponentProps<typeof ScheduleList>> extends false ? true : false
+>;
+
 vi.stubGlobal("React", React);
 
 vi.mock("next/navigation", () => ({
