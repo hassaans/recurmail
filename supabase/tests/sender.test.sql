@@ -22,7 +22,8 @@ select ok(pg_get_functiondef('public.claim_due_schedules(integer)'::regprocedure
 select extensions.dblink_connect(
   'sender_concurrency',
   format(
-    'host=127.0.0.1 port=5432 dbname=postgres user=postgres password=%s',
+    'host=127.0.0.1 port=5432 dbname=postgres user=%s password=%s',
+    coalesce(nullif(current_setting('hq.test_db_user', true), ''), 'postgres'),
     coalesce(nullif(current_setting('hq.test_db_password', true), ''), 'postgres')
   )
 );
