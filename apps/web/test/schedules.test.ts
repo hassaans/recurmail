@@ -6,6 +6,7 @@ import {
 import type { PublicConnection } from "../lib/connections";
 import type { Identity } from "../lib/gmail-flow";
 import { createScheduleStore } from "../lib/schedule-store";
+import type { SendHistoryRow } from "../lib/schedules";
 import {
   createScheduleHandlers,
   validateScheduleInput,
@@ -152,6 +153,7 @@ function fixture(
     readConnection: vi.fn(async (userId: string, _token: string) =>
       userId === connection.user_id ? structuredClone(connection) : null,
     ),
+    history: vi.fn(async () => [] as SendHistoryRow[]),
   };
   const authenticate = vi.fn<(request: Request) => Promise<Identity | null>>(
     async () => ({ user: owner, accessToken }),
@@ -756,6 +758,38 @@ describe("US-005 schedule HTTP handlers with injected persistence", () => {
       expect(f.store.delete).not.toHaveBeenCalled();
     },
   );
+
+  it("returns history only after confirming the schedule belongs to the caller", async () => {
+    const f = fixture([row()]);
+    const record = {
+      id: "send-1",
+      scheduled_for: nextSendAt,
+      attempted_at: nextSendAt,
+      status: "failed" as const,
+      error_code: "invalid_grant",
+    };
+    vi.mocked(f.store.history).mockResolvedValue([record]);
+
+    const response = await f.handlers.history(
+      request("/api/schedules/schedule-1/history"),
+      "schedule-1",
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ history: [record] });
+    expect(f.store.history).toHaveBeenCalledWith(
+      owner.id,
+      "schedule-1",
+      accessToken,
+    );
+
+    const foreign = fixture([row({ id: "foreign", user_id: "other" })]);
+    const missing = await foreign.handlers.history(
+      request("/api/schedules/foreign/history"),
+      "foreign",
+    );
+    expect(missing.status).toBe(404);
+    expect(foreign.store.history).not.toHaveBeenCalled();
+  });
 });
 
 const operations = [
@@ -767,6 +801,7 @@ const operations = [
   ["pause", "POST", "/api/schedules/schedule-1/pause"],
   ["resume", "POST", "/api/schedules/schedule-1/resume"],
   ["pauseAll", "POST", "/api/schedules/pause-all"],
+  ["history", "GET", "/api/schedules/schedule-1/history"],
 ] as const;
 
 describe("US-005 schedule authentication and mutation origins", () => {

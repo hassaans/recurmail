@@ -192,7 +192,7 @@ test("weekly Monday editor saves and dashboard shows the next Monday", async ({
   expect(saved.body.schedules).toHaveLength(1);
   const nextMonday = new Date(saved.body.schedules[0].next_send_at);
   expect(nextMonday.getUTCDay()).toBe(1);
-  await expect(page.getByText(/Next send:.*Monday/i)).toBeVisible();
+  await expect(page.getByText(/Next send.*Monday/i)).toBeVisible();
 });
 
 test("schedule editor fits a 375px viewport without horizontal overflow", async ({
@@ -205,6 +205,167 @@ test("schedule editor fits a 375px viewport without horizontal overflow", async 
     document: document.documentElement.scrollWidth,
   }));
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
+});
+
+test("dashboard summarizes schedules and pause-all pauses every active schedule", async ({
+  page,
+}) => {
+  const first = await browserRequest<ForecastResponse>(
+    page,
+    "/api/schedules",
+    "POST",
+    {
+      subject: "First reminder",
+      body_text: "First message",
+      to: ["one@example.test", "two@example.test"],
+      rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;BYSECOND=0",
+      timezone: "UTC",
+    },
+  );
+  const second = await browserRequest<ForecastResponse>(
+    page,
+    "/api/schedules",
+    "POST",
+    {
+      subject: "Second reminder",
+      body_text: "Second message",
+      to: ["three@example.test"],
+      rrule: "FREQ=WEEKLY;BYDAY=MO,FR;BYHOUR=9;BYMINUTE=0;BYSECOND=0",
+      timezone: "UTC",
+    },
+  );
+  expect(first.status).toBe(201);
+  expect(second.status).toBe(201);
+
+  await page.reload();
+  await expect(page.getByText("First reminder")).toBeVisible();
+  await expect(page.getByText("2 recipients")).toBeVisible();
+  await expect(page.getByText("Every day")).toBeVisible();
+  await expect(page.getByText("Every week on Monday and Friday")).toBeVisible();
+  await expect(page.getByText("Active", { exact: true })).toHaveCount(2);
+  await expect(
+    page.getByRole("link", { name: "Edit", exact: true }),
+  ).toHaveCount(2);
+  await page.setViewportSize({ width: 375, height: 812 });
+  const dashboardDimensions = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+  }));
+  expect(dashboardDimensions.document).toBeLessThanOrEqual(
+    dashboardDimensions.viewport,
+  );
+
+  await page.getByRole("button", { name: "Pause all schedules" }).click();
+  await expect(page.getByText("Paused", { exact: true })).toHaveCount(2);
+  const firstRow = page
+    .getByRole("listitem")
+    .filter({ hasText: "First reminder" });
+  const resumeButton = firstRow.getByRole("button", { name: "Resume" });
+  await expect(resumeButton).toBeEnabled();
+  await resumeButton.click();
+  await expect(firstRow).toContainText("Status Active");
+  const pauseButton = firstRow.getByRole("button", { name: "Pause" });
+  await expect(pauseButton).toBeEnabled();
+  await pauseButton.click();
+  await expect(firstRow).toContainText("Status Paused");
+  const secondRow = page
+    .getByRole("listitem")
+    .filter({ hasText: "Second reminder" });
+  const deleteButton = secondRow.getByRole("button", { name: "Delete" });
+  await expect(deleteButton).toBeEnabled();
+  await deleteButton.click();
+  await expect(secondRow).toHaveCount(0);
+});
+
+test("schedule history shows sent and failed entries with plain-language reasons", async ({
+  page,
+  request,
+  scenario,
+}) => {
+  const created = await browserRequest<ForecastResponse>(
+    page,
+    "/api/schedules",
+    "POST",
+    {
+      subject: "History reminder",
+      body_text: "History message",
+      to: ["history@example.test"],
+      rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;BYSECOND=0",
+      timezone: "UTC",
+    },
+  );
+  expect(created.status).toBe(201);
+  const seeded = await request.post(
+    `${fakeSupabaseUrl}/__test/scenarios/${scenario.id}/send-log`,
+    {
+      data: {
+        schedule_id: created.body.schedule.id,
+        rows: [
+          {
+            attempted_at: "2026-10-14T09:00:00.000Z",
+            scheduled_for: "2026-10-14T09:00:00.000Z",
+            status: "sent",
+            error_code: null,
+          },
+          {
+            attempted_at: "2026-10-15T09:00:00.000Z",
+            scheduled_for: "2026-10-15T09:00:00.000Z",
+            status: "failed",
+            error_code: "invalid_grant",
+          },
+          {
+            attempted_at: "2026-10-16T09:00:00.000Z",
+            scheduled_for: "2026-10-16T09:00:00.000Z",
+            status: "deferred",
+            error_code: "gmail_quota_deferred",
+          },
+        ],
+      },
+    },
+  );
+  expect(seeded.status()).toBe(200);
+
+  await page.goto(`/schedules/${created.body.schedule.id}`);
+  await expect(
+    page.getByRole("heading", { name: "Send history", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Sent", { exact: true })).toBeVisible();
+  await expect(page.getByText("Failed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Deferred", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(/Gmail permission needs renewing/i),
+  ).toBeVisible();
+  await expect(page.getByText(/Gmail daily sending limit/i)).toBeVisible();
+  await page.setViewportSize({ width: 375, height: 812 });
+  const historyDimensions = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+  }));
+  expect(historyDimensions.document).toBeLessThanOrEqual(
+    historyDimensions.viewport,
+  );
+});
+
+test("needs_reconnect shows a clear reconnect banner and action", async ({
+  page,
+  context,
+  scenario,
+}) => {
+  await context.addCookies([
+    testSessionCookie(
+      scenario.reconnect.accessToken,
+      undefined,
+      scenario.reconnect.refreshToken,
+    ),
+  ]);
+  await page.goto("/dashboard");
+  const reconnectBanner = page
+    .getByRole("region", { name: "Gmail account" })
+    .getByRole("alert");
+  await expect(reconnectBanner).toContainText(/Gmail.*reconnect/i);
+  await expect(
+    reconnectBanner.getByRole("button", { name: /reconnect Gmail/i }),
+  ).toBeVisible();
 });
 
 test("editor displays the daily-limit warning exactly as returned by the API", async ({

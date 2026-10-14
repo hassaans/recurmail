@@ -73,6 +73,14 @@
   border-radius: 12px;
   padding: 18px;
 }
+.reconnect {
+  margin-block: 16px;
+  padding: 16px;
+  border: 1px solid #f6d7a8;
+  border-radius: 12px;
+  background: #fff4e5;
+  color: #6b4a12;
+}
 .button {
   display: inline-block;
   border: 0;
