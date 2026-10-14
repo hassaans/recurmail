@@ -11,8 +11,18 @@ export type ClaimedSchedule = GmailSchedule & {
   timezone: string;
 };
 
+export type ReconnectNotice = {
+  id: string;
+  recipient: string;
+  reconnect_url: string;
+  attempts: number;
+};
+
 export type SenderStore = {
   claim(limit: number): Promise<ClaimedSchedule[]>;
+  claimReconnectNotices(limit: number): Promise<ReconnectNotice[]>;
+  markReconnectNoticeSent(id: string): Promise<void>;
+  markReconnectNoticeFailed(id: string, errorCode: string): Promise<void>;
   reclaimStaleSending(olderThan: string): Promise<ClaimedSchedule[]>;
   recordFailure(input: {
     scheduleId: string;
@@ -42,6 +52,8 @@ export type SenderStore = {
     sent: number;
     failed: number;
     deferred: number;
+    noticesSent: number;
+    noticesFailed: number;
   }): Promise<void>;
 };
 
@@ -53,6 +65,9 @@ export type SenderConfig = {
   now?: () => Date;
   send?: typeof sendSchedule;
   fetcher?: typeof fetch;
+  resendApiKey?: string;
+  reconnectEmailFrom?: string;
+  resendEndpoint?: string;
 };
 
 export async function runSender(
@@ -66,6 +81,8 @@ export async function runSender(
   let sent = 0;
   let failed = 0;
   let deferred = 0;
+  let noticesSent = 0;
+  let noticesFailed = 0;
   const send = config.send ?? sendSchedule;
   const reconnectUsers = new Set<string>();
 
@@ -228,11 +245,85 @@ export async function runSender(
         failed += 1;
       }
     }
+    const apiKey = config.resendApiKey?.trim() || "";
+    const from = config.reconnectEmailFrom?.trim() || "";
+    if (!apiKey) {
+      console.error("reconnect notice dispatch skipped", {
+        errorCode: "resend_api_key_missing",
+      });
+    } else if (!from) {
+      console.error("reconnect notice dispatch skipped", {
+        errorCode: "reconnect_email_from_missing",
+      });
+    } else {
+      let notices: ReconnectNotice[] = [];
+      try {
+        notices = await store.claimReconnectNotices(20);
+      } catch {
+        console.error("reconnect notice claim failed", {
+          errorCode: "notice_claim_store_failed",
+        });
+        noticesFailed += 1;
+      }
+      for (const notice of notices) {
+        let errorCode: string | undefined;
+        try {
+          const link = notice.reconnect_url;
+          const response = await (config.fetcher ?? fetch)(
+            config.resendEndpoint || "https://api.resend.com/emails",
+            {
+              method: "POST",
+              headers: {
+                authorization: `Bearer ${apiKey}`,
+                "content-type": "application/json",
+              },
+              body: JSON.stringify({
+                from,
+                to: [notice.recipient],
+                subject:
+                  "Reconnect Gmail to keep your RecurMail schedules running",
+                text: `Your schedules are paused because Google access stopped working. Reconnect Gmail here: ${link}`,
+                html: `<p>Your schedules are paused because Google access stopped working.</p><p><a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>`,
+              }),
+            },
+          );
+          if (!response.ok) errorCode = `resend_http_${response.status}`;
+        } catch {
+          errorCode = "resend_network_error";
+        }
+        if (!errorCode) {
+          try {
+            await store.markReconnectNoticeSent(notice.id);
+            noticesSent += 1;
+          } catch {
+            errorCode = "notice_sent_store_failed";
+            console.error("reconnect notice store operation failed", {
+              noticeId: notice.id,
+              errorCode,
+            });
+            noticesFailed += 1;
+          }
+        }
+        if (errorCode && errorCode !== "notice_sent_store_failed") {
+          try {
+            await store.markReconnectNoticeFailed(notice.id, errorCode);
+          } catch {
+            console.error("reconnect notice store operation failed", {
+              noticeId: notice.id,
+              errorCode: "notice_failure_store_failed",
+            });
+          }
+          noticesFailed += 1;
+        }
+      }
+    }
     return {
       claimed: schedules.length + recovered.length,
       sent,
       failed,
       deferred,
+      notices_sent: noticesSent,
+      notices_failed: noticesFailed,
     };
   } finally {
     const finishedAt = now();
@@ -244,6 +335,22 @@ export async function runSender(
       sent,
       failed,
       deferred,
+      noticesSent,
+      noticesFailed,
     });
   }
+}
+
+function escapeHtml(value: string): string {
+  const escaped: Record<string, string> = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  };
+  return value.replace(
+    /[&<>"']/g,
+    (character) => escaped[character] || character,
+  );
 }

@@ -30,6 +30,17 @@ function createStore(url: string, serviceKey: string): SenderStore {
   }
   return {
     claim: (limit) => rpc("claim_due_schedules", { p_limit: limit }),
+    claimReconnectNotices: (limit) =>
+      rpc("claim_reconnect_email_outbox", { p_limit: limit }),
+    markReconnectNoticeSent: async (id) => {
+      await rpc("mark_reconnect_email_sent", { p_notice_id: id });
+    },
+    markReconnectNoticeFailed: async (id, errorCode) => {
+      await rpc("mark_reconnect_email_failed", {
+        p_notice_id: id,
+        p_error_code: errorCode,
+      });
+    },
     reclaimStaleSending: (olderThan) =>
       rpc("reclaim_stale_sending", { p_older_than: olderThan }),
     recordFailure: async (input) => {
@@ -75,6 +86,8 @@ function createStore(url: string, serviceKey: string): SenderStore {
           sent_count: input.sent,
           failed_count: input.failed,
           deferred_count: input.deferred,
+          notices_sent: input.noticesSent,
+          notices_failed: input.noticesFailed,
         }),
       });
       if (!response.ok)
@@ -99,6 +112,9 @@ Deno.serve(
           clientId: required("GOOGLE_CLIENT_ID"),
           clientSecret: required("GOOGLE_CLIENT_SECRET"),
           appUrl: required("APP_URL"),
+          resendApiKey: Deno.env.get("RESEND_API_KEY")?.trim() || "",
+          reconnectEmailFrom:
+            Deno.env.get("RECONNECT_EMAIL_FROM")?.trim() || "",
         },
       ),
   }),
