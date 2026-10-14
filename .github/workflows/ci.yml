@@ -42,7 +42,9 @@ jobs:
       - name: Start Supabase database
         run: supabase start -x gotrue,realtime,storage-api,imgproxy,kong,mailpit,postgrest,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
       - name: Run pgTAP database tests
-        run: supabase test db
+        run: supabase test db supabase/tests/rls.test.sql
+      - name: Run sender database tests
+        run: docker exec -i -u postgres supabase_db_recurmail psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f - < supabase/tests/sender.test.sql
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
