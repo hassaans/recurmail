@@ -43,16 +43,15 @@ deployment secrets.
 ## Google and Supabase setup
 
 Apply the migrations in `supabase/migrations` to your Supabase project, including
-`0002_harden_grants.sql`. Enable the Google provider in Supabase Auth with your
-Google OAuth client ID and secret. Sign-in requests `openid email profile` only.
-Configure Supabase's site URL to match `APP_URL` and allow
-`APP_URL/auth/callback**` in its redirect URL list. The callback includes a state
-query parameter.
+`0002_harden_grants.sql`. Enable the Google provider in Supabase Auth with the
+same Google OAuth client ID and secret used by the web app. The web app handles
+Google's authorization-code flow and exchanges the resulting ID token with
+Supabase Auth. Sign-in requests `openid email profile` only.
 
-Register two redirect URIs on the Google OAuth web client. Use your Supabase
-project's `/auth/v1/callback` URL for sign-in and
-`APP_URL/api/gmail/callback` for the separate Gmail connection. Enable the Gmail
-API and configure the consent screen for
+Register these Authorized redirect URIs on the Google OAuth web client:
+`${APP_URL}/auth/callback` for sign-in and
+`${APP_URL}/api/gmail/callback` for the separate Gmail connection. Enable the
+Gmail API and configure the consent screen for
 `https://www.googleapis.com/auth/gmail.send`. During Google's testing stage, add
 your test accounts to the consent screen's test-user list.
 
@@ -61,12 +60,21 @@ Set these variables in the web app's environment.
 | Variable | Value |
 | --- | --- |
 | `APP_URL` | The web app's origin, such as `http://localhost:3000` locally or its HTTPS origin in production. Use this same host in your browser. |
-| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL. |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | The project's publishable API key, used with signed-in user sessions. |
+| `SUPABASE_URL` | Your Supabase project URL. |
+| `SUPABASE_PUBLISHABLE_KEY` | The project's publishable API key, used with signed-in user sessions. |
 | `SUPABASE_SECRET_KEY` | The server-only secret API key, used for connection writes, credential reads, schedule pausing, account deletion and admin metrics. |
 | `GOOGLE_CLIENT_ID` | The Google OAuth web client ID. |
 | `GOOGLE_CLIENT_SECRET` | That client's secret. |
 | `TOKEN_ENCRYPTION_KEY` | Standard base64 encoding of exactly 32 random bytes, held only in server secrets. |
+
+The project URL and publishable key are server-only environment variables. The
+sign-in callback stays on the app origin, so the Supabase project address is not
+used as a browser redirect.
+
+Sign-in uses PKCE and a one-time nonce. RecurMail sends the SHA-256 hex digest of
+the raw nonce to Google, then sends the raw nonce with Google's ID token to
+Supabase Auth for verification, following
+[Supabase's Google sign-in guide](https://supabase.com/docs/guides/auth/social-login/auth-google).
 
 Generate the encryption key once with
 `node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))'`
@@ -135,7 +143,7 @@ fakes; verifying live Google OAuth, Supabase persistence or email delivery needs
 configured services and a dedicated Google test account.
 
 The native adapters follow [Google's web OAuth flow](https://developers.google.com/identity/protocols/oauth2/web-server)
-and [Supabase's PKCE flow](https://supabase.com/docs/guides/auth/sessions/pkce-flow).
+and [Supabase's ID-token sign-in flow](https://supabase.com/docs/guides/auth/social-login/auth-google).
 
 ## License
 

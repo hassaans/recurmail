@@ -79,7 +79,7 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
         "fake-secret access-token refresh-token oauth-code owner@gmail.com provider-body unverified-user";
       if (operation === "configuration") {
         setEnvironment();
-        vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", secret);
+        vi.stubEnv("SUPABASE_URL", secret);
         try {
           expect(configuredRuntime()).toBeNull();
         } finally {
@@ -216,11 +216,15 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
         if (
           url.origin === "https://oauth2.googleapis.com" &&
           url.pathname === "/token"
-        )
+        ) {
+          const form = new URLSearchParams(String(init?.body));
+          if (form.get("code") === "fake-auth-code")
+            return Response.json({ id_token: "fake-google-id-token" });
           return Response.json({
             refresh_token: "fake-gmail-refresh",
             scope: "https://www.googleapis.com/auth/gmail.send",
           });
+        }
         if (
           url.origin === "https://oauth2.googleapis.com" &&
           url.pathname === "/revoke"
@@ -272,10 +276,13 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
     vi.stubGlobal("fetch", fetcher);
     try {
       const signin = await runRoute("signin", request());
+      const googleAuthUrl = new URL(signin.headers.get("location") ?? "");
       const authRedirect = new URL(
-        new URL(signin.headers.get("location") ?? "").searchParams.get(
-          "redirect_to",
-        ) ?? "",
+        googleAuthUrl.searchParams.get("redirect_uri") ?? "",
+      );
+      authRedirect.searchParams.set(
+        "state",
+        googleAuthUrl.searchParams.get("state") ?? "",
       );
       authRedirect.searchParams.set("code", "fake-auth-code");
       const signedIn = await runRoute(
@@ -363,8 +370,8 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
 
   it.each([
     "APP_URL",
-    "NEXT_PUBLIC_SUPABASE_URL",
-    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    "SUPABASE_URL",
+    "SUPABASE_PUBLISHABLE_KEY",
     "SUPABASE_SECRET_KEY",
     "GOOGLE_CLIENT_ID",
     "GOOGLE_CLIENT_SECRET",
@@ -411,8 +418,8 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
 function setEnvironment() {
   const env = {
     APP_URL: config.origin,
-    NEXT_PUBLIC_SUPABASE_URL: config.supabaseUrl,
-    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: config.publishableKey,
+    SUPABASE_URL: config.supabaseUrl,
+    SUPABASE_PUBLISHABLE_KEY: config.publishableKey,
     SUPABASE_SECRET_KEY: config.secretKey,
     GOOGLE_CLIENT_ID: config.googleClientId,
     GOOGLE_CLIENT_SECRET: config.googleClientSecret,

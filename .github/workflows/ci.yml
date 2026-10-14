@@ -26,6 +26,20 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
+      - name: Build the web app
+        run: pnpm --filter @recurmail/web build
+      - name: Keep Supabase project addresses out of browser output
+        shell: bash
+        run: |
+          set -euo pipefail
+          if rg -l --hidden -i 'supabase\.co' apps/web/.next/static >/dev/null; then
+            echo "Supabase project address found in static browser output."
+            exit 1
+          fi
+          if rg -l --hidden -i --glob '*.html' 'supabase\.co' apps/web/.next/server/app >/dev/null; then
+            echo "Supabase project address found in prerendered HTML."
+            exit 1
+          fi
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm e2e
 

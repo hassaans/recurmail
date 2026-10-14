@@ -37,8 +37,7 @@ export function createSupabaseAdmin(config: {
 }
 
 export interface SupabaseAuth {
-  authorizationUrl(redirectUri: string, challenge: string): string;
-  exchangeCode(code: string, verifier: string): Promise<Session>;
+  exchangeIdToken(idToken: string, nonce: string): Promise<Session>;
   refresh(refreshToken: string): Promise<Session>;
   getUser(accessToken: string): Promise<SignedInUser | null>;
 }
@@ -83,19 +82,8 @@ export function createSupabaseAuth(config: {
     };
   }
   return {
-    authorizationUrl(redirectUri, challenge) {
-      const url = new URL(`${config.url}/auth/v1/authorize`);
-      url.search = new URLSearchParams({
-        provider: "google",
-        scopes: "openid email profile",
-        redirect_to: redirectUri,
-        code_challenge: challenge,
-        code_challenge_method: "s256",
-      }).toString();
-      return url.toString();
-    },
-    exchangeCode: (code, verifier) =>
-      token("pkce", { auth_code: code, code_verifier: verifier }),
+    exchangeIdToken: (idToken, nonce) =>
+      token("id_token", { provider: "google", id_token: idToken, nonce }),
     refresh: (refreshToken) =>
       token("refresh_token", { refresh_token: refreshToken }),
     async getUser(accessToken) {

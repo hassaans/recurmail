@@ -23,23 +23,7 @@ describe("native Supabase Auth adapter", () => {
     });
   });
 
-  it("signs in with only identity scopes and PKCE", () => {
-    const auth = createSupabaseAuth(config);
-    const url = new URL(
-      auth.authorizationUrl(
-        "https://app.test/auth/callback?state=s",
-        "challenge",
-      ),
-    );
-    expect(url.pathname).toBe("/auth/v1/authorize");
-    expect(url.searchParams.get("provider")).toBe("google");
-    expect(url.searchParams.get("scopes")).toBe("openid email profile");
-    expect(url.searchParams.get("code_challenge")).toBe("challenge");
-    expect(url.searchParams.get("code_challenge_method")).toBe("s256");
-    expect(url.toString()).not.toContain("gmail.send");
-  });
-
-  it("exchanges PKCE server-side and discards Google provider credentials", async () => {
+  it("exchanges a Google ID token with its raw nonce and discards provider tokens", async () => {
     const fetcher = vi.fn().mockResolvedValue(
       Response.json({
         access_token: "fake-access",
@@ -50,18 +34,22 @@ describe("native Supabase Auth adapter", () => {
       }),
     );
     const auth = createSupabaseAuth({ ...config, fetcher, now: () => 1000 });
-    const session = await auth.exchangeCode("code", "verifier");
+    const session = await auth.exchangeIdToken(
+      "fake-google-id-token",
+      "raw-nonce",
+    );
     expect(session).toEqual({
       accessToken: "fake-access",
       refreshToken: "fake-session-refresh",
       expiresAt: 3601000,
     });
     expect(fetcher.mock.calls[0][0]).toBe(
-      "https://db.test/auth/v1/token?grant_type=pkce",
+      "https://db.test/auth/v1/token?grant_type=id_token",
     );
     expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
-      auth_code: "code",
-      code_verifier: "verifier",
+      provider: "google",
+      id_token: "fake-google-id-token",
+      nonce: "raw-nonce",
     });
     expect(fetcher.mock.calls[0][1].headers).toEqual({
       apikey: "fake-publishable",
@@ -120,9 +108,9 @@ describe("native Supabase Auth adapter", () => {
       ...config,
       fetcher: vi.fn().mockResolvedValue(Response.json(body, { status })),
     });
-    await expect(auth.exchangeCode("code", "verifier")).rejects.toThrow(
-      "Sign-in failed",
-    );
+    await expect(
+      auth.exchangeIdToken("fake-google-id-token", "raw-nonce"),
+    ).rejects.toThrow("Sign-in failed");
   });
 
   it("rejects an Auth response without a usable identity", async () => {
