@@ -5,6 +5,7 @@ export default defineConfig({
   testDir: ".",
   testMatch: "**/*.spec.ts",
   fullyParallel: true,
+  workers: 1,
   reporter: "list",
   use: {
     baseURL: "http://127.0.0.1:3100",
