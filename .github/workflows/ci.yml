@@ -44,12 +44,12 @@ jobs:
       - name: Run pgTAP database tests
         shell: bash
         run: |
-          test_db_url="$(supabase status | python3 -c '
+          test_db_url="$(supabase status --output env | python3 -c '
           import sys
           from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
-          line = next((line for line in sys.stdin if line.lstrip().startswith("DB URL:")), "")
-          value = line.split(":", 1)[1].strip() if line else ""
+          line = next((line for line in sys.stdin if line.startswith("DB_URL=")), "")
+          value = line.partition("=")[2].strip().strip(chr(34)) if line else ""
           parsed = urlsplit(value)
           password = unquote(parsed.password or "")
           if not password:
