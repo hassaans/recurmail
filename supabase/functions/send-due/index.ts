@@ -2,6 +2,15 @@
 
 import { runSender, type SenderStore } from "./engine.ts";
 import { createSenderHandler } from "./handler.ts";
+import {
+  captureError,
+  captureFailureRate,
+  finishCronCheckIn,
+  initSentry,
+  startCronCheckIn,
+} from "./sentry.ts";
+
+initSentry(Deno.env.get("SENTRY_DSN"));
 
 const required = (name: string): string => {
   const value = Deno.env.get(name)?.trim();
@@ -28,7 +37,20 @@ function createStore(url: string, serviceKey: string): SenderStore {
       throw new Error(`Supabase RPC ${name} failed (${response.status})`);
     return (await response.json()) as T;
   }
+  async function failureMetrics() {
+    const result = await rpc<{
+      failed_last_hour: number;
+      attempted_last_hour: number;
+      failure_rate_last_hour: number;
+    }>("get_admin_metrics", {});
+    return {
+      failed: result.failed_last_hour,
+      attempted: result.attempted_last_hour,
+      rate: result.failure_rate_last_hour,
+    };
+  }
   return {
+    failureMetrics,
     claim: (limit) => rpc("claim_due_schedules", { p_limit: limit }),
     claimReconnectNotices: (limit) =>
       rpc("claim_reconnect_email_outbox", { p_limit: limit }),
@@ -88,11 +110,19 @@ function createStore(url: string, serviceKey: string): SenderStore {
           deferred_count: input.deferred,
           notices_sent: input.noticesSent,
           notices_failed: input.noticesFailed,
+          failure_rate_last_hour: input.failureRateLastHour,
+          failed_last_hour: input.failedLastHour,
+          attempted_last_hour: input.attemptedLastHour,
         }),
       });
       if (!response.ok)
         throw new Error(
           `Supabase heartbeat insert failed (${response.status})`,
+        );
+      if (input.failureRateLastHour !== null)
+        captureFailureRate(
+          input.failureRateLastHour,
+          Deno.env.get("SENTRY_DSN"),
         );
     },
   };
@@ -101,21 +131,35 @@ function createStore(url: string, serviceKey: string): SenderStore {
 Deno.serve(
   createSenderHandler({
     getCronSecret: () => Deno.env.get("SENDER_CRON_SECRET"),
-    execute: () =>
-      runSender(
-        createStore(
-          required("SUPABASE_URL"),
-          required("SUPABASE_SERVICE_ROLE_KEY"),
-        ),
-        {
-          key: required("TOKEN_ENCRYPTION_KEY"),
-          clientId: required("GOOGLE_CLIENT_ID"),
-          clientSecret: required("GOOGLE_CLIENT_SECRET"),
-          appUrl: required("APP_URL"),
-          resendApiKey: Deno.env.get("RESEND_API_KEY")?.trim() || "",
-          reconnectEmailFrom:
-            Deno.env.get("RECONNECT_EMAIL_FROM")?.trim() || "",
-        },
-      ),
+    execute: async () => {
+      const dsn = Deno.env.get("SENTRY_DSN");
+      const checkIn = startCronCheckIn(
+        dsn,
+        Deno.env.get("SENTRY_CRON_MONITOR_SLUG"),
+      );
+      try {
+        const result = await runSender(
+          createStore(
+            required("SUPABASE_URL"),
+            required("SUPABASE_SERVICE_ROLE_KEY"),
+          ),
+          {
+            key: required("TOKEN_ENCRYPTION_KEY"),
+            clientId: required("GOOGLE_CLIENT_ID"),
+            clientSecret: required("GOOGLE_CLIENT_SECRET"),
+            appUrl: required("APP_URL"),
+            resendApiKey: Deno.env.get("RESEND_API_KEY")?.trim() || "",
+            reconnectEmailFrom:
+              Deno.env.get("RECONNECT_EMAIL_FROM")?.trim() || "",
+          },
+        );
+        finishCronCheckIn(checkIn, "ok");
+        return result;
+      } catch (error) {
+        captureError(error, dsn);
+        finishCronCheckIn(checkIn, "error");
+        throw error;
+      }
+    },
   }),
 );

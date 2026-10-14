@@ -3,7 +3,10 @@
   "globalPassThroughEnv": [
     "SENDER_CRON_SECRET",
     "RESEND_API_KEY",
-    "RECONNECT_EMAIL_FROM"
+    "RECONNECT_EMAIL_FROM",
+    "ADMIN_EMAILS",
+    "SENTRY_CRON_MONITOR_SLUG",
+    "SENTRY_DSN"
   ],
   "tasks": {
     "typecheck": {

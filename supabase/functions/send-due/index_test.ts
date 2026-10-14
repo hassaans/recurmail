@@ -117,6 +117,9 @@ function recordingStore(schedules: ClaimedSchedule[]): SenderStore & {
     async reconnect(value) {
       state.reconnects.push(value);
     },
+    async failureMetrics() {
+      return { failed: 2, attempted: 20, rate: 0.1 };
+    },
     async heartbeat(value) {
       state.heartbeats.push(value);
     },
@@ -766,6 +769,9 @@ Deno.test("Resend 2xx marks a reconnect notice sent and escapes its HTML link", 
         deferred: 0,
         noticesSent: 1,
         noticesFailed: 0,
+        failureRateLastHour: 0.1,
+        failedLastHour: 2,
+        attemptedLastHour: 20,
       },
       "heartbeat records notice delivery counts",
     );
