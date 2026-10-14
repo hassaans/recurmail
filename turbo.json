@@ -1,5 +1,10 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": [
+    "SENDER_CRON_SECRET",
+    "RESEND_API_KEY",
+    "RECONNECT_EMAIL_FROM"
+  ],
   "tasks": {
     "typecheck": {
       "dependsOn": ["^typecheck"],

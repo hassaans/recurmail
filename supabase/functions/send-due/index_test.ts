@@ -100,6 +100,11 @@ function recordingStore(schedules: ClaimedSchedule[]): SenderStore & {
     async claim() {
       return schedules;
     },
+    async claimReconnectNotices() {
+      return [];
+    },
+    async markReconnectNoticeSent() {},
+    async markReconnectNoticeFailed() {},
     async reclaimStaleSending() {
       return state.reclaimed as ClaimedSchedule[];
     },
@@ -194,7 +199,14 @@ Deno.test("fake Gmail HTTP E2E sends a MIME message and records sent send_log da
     });
     equal(
       result,
-      { claimed: 1, sent: 1, failed: 0, deferred: 0 },
+      {
+        claimed: 1,
+        sent: 1,
+        failed: 0,
+        deferred: 0,
+        notices_sent: 0,
+        notices_failed: 0,
+      },
       "sender result",
     );
     equal(
@@ -481,7 +493,14 @@ Deno.test("one completion store failure does not stop later schedules or heartbe
   });
   equal(
     result,
-    { claimed: 3, sent: 2, failed: 1, deferred: 0 },
+    {
+      claimed: 3,
+      sent: 2,
+      failed: 1,
+      deferred: 0,
+      notices_sent: 0,
+      notices_failed: 0,
+    },
     "batch totals",
   );
   equal(
@@ -533,7 +552,14 @@ Deno.test("a reconnect store failure does not stop later schedules or heartbeat"
   });
   equal(
     result,
-    { claimed: 3, sent: 0, failed: 3, deferred: 0 },
+    {
+      claimed: 3,
+      sent: 0,
+      failed: 3,
+      deferred: 0,
+      notices_sent: 0,
+      notices_failed: 0,
+    },
     "reconnect batch totals",
   );
   equal(sends, 1, "the disconnected account is not sent again");
@@ -609,4 +635,189 @@ Deno.test("post-send DB failure is logged and a later run reclaims without resen
     },
     "the later run advances the still-sending schedule",
   );
+});
+
+function noticeStore() {
+  const store = recordingStore([]) as SenderStore & {
+    claimReconnectNotices: (limit: number) => Promise<
+      {
+        id: string;
+        recipient: string;
+        reconnect_url: string;
+        attempts: number;
+      }[]
+    >;
+    markReconnectNoticeSent: (id: string) => Promise<void>;
+    markReconnectNoticeFailed: (id: string, errorCode: string) => Promise<void>;
+    heartbeats: unknown[];
+  };
+  const state = {
+    queue: [
+      {
+        id: "notice-1",
+        recipient: "user@example.test",
+        reconnect_url: "https://recurmail.example.test/reconnect?x=1&y=<z>",
+        attempts: 0,
+        status: "queued",
+      },
+    ],
+    sent: [] as string[],
+    failures: [] as { id: string; errorCode: string }[],
+    claims: 0,
+  };
+  store.claimReconnectNotices = async (limit: number) => {
+    assert(limit === 20, "notice claim is capped at 20");
+    state.claims += 1;
+    return state.queue.flatMap((row) => {
+      if (row.status !== "queued" || row.attempts >= 3) return [];
+      row.status = "sending";
+      row.attempts += 1;
+      return [{ ...row }];
+    });
+  };
+  store.markReconnectNoticeSent = async (id: string) => {
+    state.sent.push(id);
+    const row = state.queue.find((item) => item.id === id);
+    if (row) row.status = "sent";
+  };
+  store.markReconnectNoticeFailed = async (id: string, errorCode: string) => {
+    state.failures.push({ id, errorCode });
+    const row = state.queue.find((item) => item.id === id);
+    if (row) row.status = row.attempts >= 3 ? "failed" : "queued";
+  };
+  return { store, state };
+}
+
+async function fakeResend(statuses: number[]) {
+  type Payload = { subject: string; text: string; html: string };
+  const requests: { authorization: string | null; body: Payload }[] = [];
+  const server = Deno.serve(
+    { hostname: "127.0.0.1", port: 0, onListen() {} },
+    async (request) => {
+      requests.push({
+        authorization: request.headers.get("authorization"),
+        body: (await request.json()) as Payload,
+      });
+      const status =
+        statuses[Math.min(requests.length - 1, statuses.length - 1)];
+      return new Response(
+        status >= 200 && status < 300
+          ? JSON.stringify({ id: "resend-id" })
+          : "provider error",
+        { status },
+      );
+    },
+  );
+  const address = server.addr as Deno.NetAddr;
+  return {
+    endpoint: `http://${address.hostname}:${address.port}/emails`,
+    requests,
+    close: () => server.shutdown(),
+  };
+}
+
+const noticeConfig = (endpoint: string, key = "resend-test-key") => ({
+  key: "unused",
+  clientId: "unused",
+  clientSecret: "unused",
+  appUrl: "https://recurmail.example.test",
+  resendApiKey: key,
+  reconnectEmailFrom: "RecurMail <notices@example.test>",
+  resendEndpoint: endpoint,
+});
+
+Deno.test("Resend 2xx marks a reconnect notice sent and escapes its HTML link", async () => {
+  const { store, state } = noticeStore();
+  const server = await fakeResend([202]);
+  try {
+    const result = await runSender(store, noticeConfig(server.endpoint));
+    equal(result.notices_sent, 1, "sent notice count");
+    equal(state.sent, ["notice-1"], "notice persisted as sent");
+    equal(
+      server.requests[0].authorization,
+      "Bearer resend-test-key",
+      "Resend authorization",
+    );
+    equal(
+      server.requests[0].body.subject,
+      "Reconnect Gmail to keep your RecurMail schedules running",
+      "subject",
+    );
+    assert(
+      server.requests[0].body.text.includes(
+        "https://recurmail.example.test/reconnect?x=1&y=<z>",
+      ),
+      "plain text includes the reconnect link",
+    );
+    assert(
+      server.requests[0].body.html.includes("&amp;") &&
+        server.requests[0].body.html.includes("&lt;z&gt;"),
+      "HTML link is escaped",
+    );
+    equal(
+      store.heartbeats[0],
+      {
+        id: (store.heartbeats[0] as { id: string }).id,
+        startedAt: (store.heartbeats[0] as { startedAt: string }).startedAt,
+        finishedAt: (store.heartbeats[0] as { finishedAt: string }).finishedAt,
+        claimed: 0,
+        sent: 0,
+        failed: 0,
+        deferred: 0,
+        noticesSent: 1,
+        noticesFailed: 0,
+      },
+      "heartbeat records notice delivery counts",
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("Resend 4xx and 5xx failures increment attempts and stop after three total tries", async () => {
+  const { store, state } = noticeStore();
+  const server = await fakeResend([400, 503, 500]);
+  try {
+    for (let index = 0; index < 3; index += 1) {
+      await runSender(store, noticeConfig(server.endpoint));
+      state.failures.length = index + 1;
+    }
+    equal(server.requests.length, 3, "three total HTTP attempts");
+    equal(state.queue[0].attempts, 3, "attempts increment on each claim");
+    equal(
+      state.queue[0].status,
+      "failed",
+      "third failure leaves the notice failed",
+    );
+    equal(
+      state.failures.map((failure) => failure.errorCode),
+      ["resend_http_400", "resend_http_503", "resend_http_500"],
+      "safe status error codes",
+    );
+    await runSender(store, noticeConfig(server.endpoint));
+    equal(server.requests.length, 3, "no fourth attempt");
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("missing Resend key leaves notices queued while schedule sends continue", async () => {
+  const { envelope, key } = await nodeEncryptedToken();
+  const { store, state } = noticeStore();
+  store.claim = async () => [dueSchedule(envelope)];
+  let scheduleSends = 0;
+  const result = await runSender(store, {
+    ...noticeConfig("http://127.0.0.1:1/emails", ""),
+    key,
+    clientId: "fake",
+    clientSecret: "fake",
+    send: async () => {
+      scheduleSends += 1;
+      return "gmail-accepted";
+    },
+  });
+  equal(scheduleSends, 1, "scheduled email still sent");
+  equal(state.queue[0].status, "queued", "notice remains queued");
+  equal(state.claims, 0, "outbox is not claimed without API key");
+  equal(result.notices_sent, 0, "notice count remains zero");
 });
