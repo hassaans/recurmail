@@ -6,7 +6,9 @@
     "RECONNECT_EMAIL_FROM",
     "ADMIN_EMAILS",
     "SENTRY_CRON_MONITOR_SLUG",
-    "SENTRY_DSN"
+    "SENTRY_DSN",
+    "SUPABASE_SECRET_KEY",
+    "SUPABASE_SECRET_KEYS"
   ],
   "tasks": {
     "typecheck": {

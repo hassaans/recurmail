@@ -1,10 +1,28 @@
 import { describe, expect, it, vi } from "vitest";
 import { createConnectionStore } from "../lib/connections";
-import { createSupabaseAuth } from "../lib/supabase-auth";
+import { createSupabaseAdmin, createSupabaseAuth } from "../lib/supabase-auth";
 
-const config = { url: "https://db.test", anonKey: "fake-anon" };
+const config = { url: "https://db.test", publishableKey: "fake-publishable" };
 
 describe("native Supabase Auth adapter", () => {
+  it("deletes Auth users with the secret key in apikey only", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const admin = createSupabaseAdmin({
+      url: config.url,
+      secretKey: "fake-secret",
+      fetcher,
+    });
+    await admin.deleteUser("user/id");
+    expect(fetcher.mock.calls[0][0]).toBe(
+      "https://db.test/auth/v1/admin/users/user%2Fid",
+    );
+    expect(fetcher.mock.calls[0][1].headers).toEqual({
+      apikey: "fake-secret",
+    });
+  });
+
   it("signs in with only identity scopes and PKCE", () => {
     const auth = createSupabaseAuth(config);
     const url = new URL(
@@ -45,6 +63,10 @@ describe("native Supabase Auth adapter", () => {
       auth_code: "code",
       code_verifier: "verifier",
     });
+    expect(fetcher.mock.calls[0][1].headers).toEqual({
+      apikey: "fake-publishable",
+      "Content-Type": "application/json",
+    });
     expect(JSON.stringify(session)).not.toContain("fake-google");
   });
 
@@ -61,7 +83,7 @@ describe("native Supabase Auth adapter", () => {
       email: "owner@gmail.com",
     });
     expect(fetcher.mock.calls[0][1].headers).toEqual({
-      apikey: "fake-anon",
+      apikey: "fake-publishable",
       Authorization: "Bearer fake-access",
     });
     expect(await auth.getUser("forged-access")).toBeNull();
@@ -128,7 +150,7 @@ describe("connection persistence honors column grants and user isolation", () =>
     );
     const store = createConnectionStore({
       ...config,
-      serviceKey: "fake-service",
+      secretKey: "fake-secret",
       fetcher,
     });
     expect(await store.readPublic("owner", "fake-access")).toMatchObject({
@@ -139,8 +161,13 @@ describe("connection persistence honors column grants and user isolation", () =>
       "user_id,google_email,is_workspace,status,connected_at",
     );
     expect(new URL(url).searchParams.get("user_id")).toBe("eq.owner");
-    expect(init.headers.Authorization).toBe("Bearer fake-access");
-    expect(JSON.stringify(init)).not.toContain("fake-service");
+    expect(init.headers).toEqual({
+      apikey: "fake-publishable",
+      Authorization: "Bearer fake-access",
+      "Content-Type": "application/json",
+      Prefer: "return=minimal",
+    });
+    expect(JSON.stringify(init)).not.toContain("fake-secret");
   });
 
   it("writes credentials with service access and pauses before deleting only the owner's rows", async () => {
@@ -149,7 +176,7 @@ describe("connection persistence honors column grants and user isolation", () =>
       .mockResolvedValue(new Response(null, { status: 204 }));
     const store = createConnectionStore({
       ...config,
-      serviceKey: "fake-service",
+      secretKey: "fake-secret",
       fetcher,
     });
     await store.save({
@@ -160,14 +187,18 @@ describe("connection persistence honors column grants and user isolation", () =>
       status: "connected",
       connected_at: "2026-10-14",
     });
-    expect(fetcher.mock.calls[0][1].headers.Authorization).toBe(
-      "Bearer fake-service",
-    );
-    expect(fetcher.mock.calls[0][1].headers.Prefer).toBe(
-      "resolution=merge-duplicates,return=minimal",
-    );
+    expect(fetcher.mock.calls[0][1].headers).toEqual({
+      apikey: "fake-secret",
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    });
     await store.pauseSchedules("owner");
     await store.delete("owner");
+    expect(fetcher.mock.calls[1][1].headers).toEqual({
+      apikey: "fake-secret",
+      "Content-Type": "application/json",
+      Prefer: "return=minimal",
+    });
     expect(new URL(fetcher.mock.calls[1][0]).pathname).toBe(
       "/rest/v1/schedules",
     );
@@ -178,6 +209,11 @@ describe("connection persistence honors column grants and user isolation", () =>
       "eq.owner",
     );
     expect(fetcher.mock.calls[2][1].method).toBe("DELETE");
+    expect(fetcher.mock.calls[2][1].headers).toEqual({
+      apikey: "fake-secret",
+      "Content-Type": "application/json",
+      Prefer: "return=minimal",
+    });
   });
 
   it("reads a credential only server-side and reports persistence failures without payloads", async () => {
@@ -191,13 +227,15 @@ describe("connection persistence honors column grants and user isolation", () =>
       );
     const store = createConnectionStore({
       ...config,
-      serviceKey: "fake-service",
+      secretKey: "fake-secret",
       fetcher,
     });
     expect(await store.readEncryptedToken("owner")).toBe("v1.encrypted");
-    expect(fetcher.mock.calls[0][1].headers.Authorization).toBe(
-      "Bearer fake-service",
-    );
+    expect(fetcher.mock.calls[0][1].headers).toEqual({
+      apikey: "fake-secret",
+      "Content-Type": "application/json",
+      Prefer: "return=minimal",
+    });
     await expect(store.pauseSchedules("owner")).rejects.toThrow(
       "Connection storage failed",
     );
@@ -208,7 +246,7 @@ describe("connection persistence honors column grants and user isolation", () =>
     expect(
       await createConnectionStore({
         ...config,
-        serviceKey: "fake-service",
+        secretKey: "fake-secret",
         fetcher,
       }).readEncryptedToken("owner"),
     ).toBeNull();

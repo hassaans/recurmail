@@ -18,8 +18,8 @@ const env = {
     "base64",
   ),
   NEXT_PUBLIC_SUPABASE_URL: "https://db.example.test",
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon",
-  SUPABASE_SERVICE_ROLE_KEY: "service",
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "publishable",
+  SUPABASE_SECRET_KEY: "sb_secret_admin",
 };
 
 function ownerRequest() {
@@ -63,6 +63,14 @@ describe("owner admin metrics", () => {
     const result = await loadAdminMetrics(ownerRequest(), env, fetcher);
     expect(result).toEqual(metrics);
     expect(calls[1].url).toContain("/rpc/get_admin_metrics");
+    expect(calls[0].init?.headers).toEqual({
+      apikey: "publishable",
+      Authorization: "Bearer access",
+    });
+    expect(calls[1].init?.headers).toEqual({
+      apikey: "sb_secret_admin",
+      "content-type": "application/json",
+    });
     expect(JSON.stringify(result)).not.toContain("owner@example.com");
   });
 });

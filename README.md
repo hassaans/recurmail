@@ -62,8 +62,8 @@ Set these variables in the web app's environment.
 | --- | --- |
 | `APP_URL` | The web app's origin, such as `http://localhost:3000` locally or its HTTPS origin in production. Use this same host in your browser. |
 | `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL. |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | The project's anonymous API key. |
-| `SUPABASE_SERVICE_ROLE_KEY` | The server's service-role key, used for connection writes, credential reads and schedule pausing. |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | The project's publishable API key, used with signed-in user sessions. |
+| `SUPABASE_SECRET_KEY` | The server-only secret API key, used for connection writes, credential reads, schedule pausing, account deletion and admin metrics. |
 | `GOOGLE_CLIENT_ID` | The Google OAuth web client ID. |
 | `GOOGLE_CLIENT_SECRET` | That client's secret. |
 | `TOKEN_ENCRYPTION_KEY` | Standard base64 encoding of exactly 32 random bytes, held only in server secrets. |
@@ -84,7 +84,8 @@ stays in the encrypted, HttpOnly state cookie, bound to the signed-in user, unti
 the server exchanges the code. Only its challenge goes to the consent page.
 
 Refresh tokens are encrypted with AES-256-GCM and bound to the Supabase user ID.
-Only the service role can read or write the token column. Dashboard reads use
+Only the server-side secret API key, which maps to the `service_role` database
+role, can read or write the token column. Dashboard reads use
 the user's verified Supabase session and explicitly select the nonsecret columns
 allowed by migration 0002. Gmail credentials never appear in the session cookie,
 page output or API responses. The encrypted, HttpOnly session cookie holds only
@@ -100,6 +101,13 @@ deletes the connection. If revocation fails, the encrypted token remains for a
 retry. Successful reconnecting does not resume paused schedules. The account type
 comes from the signed-in email domain, with `gmail.com` and `googlemail.com` counted
 as personal Gmail and other domains counted as Workspace.
+
+The `send-due` Edge Function reads the API key from Supabase's injected
+`SUPABASE_SECRET_KEYS` JSON map at the `default` key. `SUPABASE_SECRET_KEY` is an
+explicit fallback for local or custom runtimes. The function authenticates cron
+requests with `SENDER_CRON_SECRET`; pg_cron needs only `project_url` and
+`sender_cron_secret` in Vault. See [monitoring](docs/monitoring.md) for the Vault
+secret list.
 
 ## Quality checks
 

@@ -9,8 +9,8 @@ const config = {
   origin: "https://app.test",
   key: randomBytes(32).toString("base64"),
   supabaseUrl: "https://db.test",
-  anonKey: "fake-anon",
-  serviceKey: "fake-service",
+  publishableKey: "fake-publishable",
+  secretKey: "fake-secret",
   googleClientId: "fake-id",
   googleClientSecret: "fake-secret",
 };
@@ -230,9 +230,8 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
           );
           return new Response(null, { status: 200 });
         }
-        expect(new Headers(init?.headers).get("Authorization")).toBe(
-          "Bearer fake-service",
-        );
+        expect(new Headers(init?.headers).get("apikey")).toBe("fake-secret");
+        expect(new Headers(init?.headers).get("Authorization")).toBeNull();
         if (url.pathname === "/rest/v1/gmail_connections") {
           if (init?.method === "POST") {
             row = JSON.parse(String(init.body));
@@ -365,8 +364,8 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
   it.each([
     "APP_URL",
     "NEXT_PUBLIC_SUPABASE_URL",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-    "SUPABASE_SERVICE_ROLE_KEY",
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    "SUPABASE_SECRET_KEY",
     "GOOGLE_CLIENT_ID",
     "GOOGLE_CLIENT_SECRET",
     "TOKEN_ENCRYPTION_KEY",
@@ -413,8 +412,8 @@ function setEnvironment() {
   const env = {
     APP_URL: config.origin,
     NEXT_PUBLIC_SUPABASE_URL: config.supabaseUrl,
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: config.anonKey,
-    SUPABASE_SERVICE_ROLE_KEY: config.serviceKey,
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: config.publishableKey,
+    SUPABASE_SECRET_KEY: config.secretKey,
     GOOGLE_CLIENT_ID: config.googleClientId,
     GOOGLE_CLIENT_SECRET: config.googleClientSecret,
     TOKEN_ENCRYPTION_KEY: config.key,

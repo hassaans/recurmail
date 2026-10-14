@@ -8,8 +8,8 @@ const config = {
   origin: "https://app.test",
   key: randomBytes(32).toString("base64"),
   supabaseUrl: "https://db.test",
-  anonKey: "fake-anon",
-  serviceKey: "fake-service",
+  publishableKey: "fake-publishable",
+  secretKey: "fake-secret",
   googleClientId: "fake-id",
   googleClientSecret: "fake-secret",
 };
@@ -81,8 +81,8 @@ describe("account deletion", () => {
     ]);
     expect(String(calls[2].init?.body)).toContain(googleToken);
     expect(calls[3].init?.method).toBe("DELETE");
-    expect(calls[3].init?.headers).toMatchObject({
-      Authorization: "Bearer fake-service",
+    expect(calls[3].init?.headers).toEqual({
+      apikey: "fake-secret",
     });
   });
 

@@ -45,8 +45,8 @@ export async function loadAdminMetrics(
 ): Promise<AdminMetrics | null> {
   const encryptionKey = env.TOKEN_ENCRYPTION_KEY?.trim();
   const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const anonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const publishableKey = env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim();
+  const secretKey = env.SUPABASE_SECRET_KEY?.trim();
   const admins = new Set(
     (env.ADMIN_EMAILS || "")
       .split(",")
@@ -56,8 +56,8 @@ export async function loadAdminMetrics(
   if (
     !encryptionKey ||
     !supabaseUrl ||
-    !anonKey ||
-    !serviceKey ||
+    !publishableKey ||
+    !secretKey ||
     admins.size === 0
   )
     return null;
@@ -66,7 +66,7 @@ export async function loadAdminMetrics(
   if (!session || session.expiresAt <= Date.now()) return null;
   const user = await createSupabaseAuth({
     url: new URL(supabaseUrl).origin,
-    anonKey,
+    publishableKey,
     fetcher,
   }).getUser(session.accessToken);
   if (!user || !admins.has(user.email.trim().toLowerCase())) return null;
@@ -76,8 +76,7 @@ export async function loadAdminMetrics(
     {
       method: "POST",
       headers: {
-        apikey: serviceKey,
-        authorization: `Bearer ${serviceKey}`,
+        apikey: secretKey,
         "content-type": "application/json",
       },
       body: "{}",
