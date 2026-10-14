@@ -19,10 +19,7 @@ commit;
 begin;
 
 select ok(pg_get_functiondef('public.claim_due_schedules(integer)'::regprocedure) ilike '%skip locked%', 'claim function uses SKIP LOCKED');
-select extensions.dblink_connect(
-  'sender_concurrency',
-  'host=127.0.0.1 port=5432 dbname=postgres user=postgres password=postgres'
-);
+select extensions.dblink_connect_u('sender_concurrency', 'dbname=postgres');
 select extensions.dblink_exec('sender_concurrency', 'begin');
 select is(
   (select id from extensions.dblink(
