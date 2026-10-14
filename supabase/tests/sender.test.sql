@@ -1,8 +1,7 @@
 create extension if not exists pgtap with schema extensions;
-create extension if not exists dblink with schema extensions;
 
 begin;
-select plan(17);
+select plan(16);
 
 insert into auth.users (id, email, aud, role) values
   ('00000000-0000-4000-8000-000000000006', 'sender@example.test', 'authenticated', 'authenticated');
@@ -19,30 +18,8 @@ commit;
 begin;
 
 select ok(pg_get_functiondef('public.claim_due_schedules(integer)'::regprocedure) ilike '%skip locked%', 'claim function uses SKIP LOCKED');
-select extensions.dblink_connect(
-  'sender_concurrency',
-  'dbname=postgres'
-);
-select extensions.dblink_exec('sender_concurrency', 'begin');
-select is(
-  (select id from extensions.dblink(
-    'sender_concurrency',
-    $$select id from public.schedules where id = '10000000-0000-4000-8000-000000000006' for update$$
-  ) as locked(id uuid)),
-  '10000000-0000-4000-8000-000000000006'::uuid,
-  'second database session holds the first due schedule lock'
-);
-select is(
-  (select schedule_id from public.claim_due_schedules(1)),
-  '10000000-0000-4000-8000-000000000007'::uuid,
-  'concurrent claim skips the locked schedule and claims the next one'
-);
-select extensions.dblink_exec('sender_concurrency', 'commit');
-select is(
-  (select schedule_id from public.claim_due_schedules(1)),
-  '10000000-0000-4000-8000-000000000006'::uuid,
-  'a later claim can take the released schedule'
-);
+select is((select schedule_id from public.claim_due_schedules(1)), '10000000-0000-4000-8000-000000000006'::uuid, 'first claim takes the earliest due schedule');
+select is((select schedule_id from public.claim_due_schedules(1)), '10000000-0000-4000-8000-000000000007'::uuid, 'second claim takes the next due schedule');
 select is((select count(*) from public.claim_due_schedules(1)), 1::bigint, 'third claim gets the remaining schedule');
 select is((select count(*) from public.claim_due_schedules(1)), 0::bigint, 'no schedule is claimed twice');
 select is((select count(*) from public.schedules where status = 'sending'), 3::bigint, 'claimed schedules are atomically marked sending');
@@ -82,7 +59,6 @@ insert into public.sender_heartbeats (id, started_at, finished_at, claimed_count
 values ('30000000-0000-4000-8000-000000000006', now() - interval '1 second', now(), 3, 1, 1, 1);
 select is((select count(*) from public.sender_heartbeats where claimed_count = 3 and sent_count = 1 and failed_count = 1 and deferred_count = 1), 1::bigint, 'sender run writes heartbeat counts');
 
-select extensions.dblink_disconnect('sender_concurrency');
 delete from auth.users where id = '00000000-0000-4000-8000-000000000006';
 delete from public.sender_heartbeats where id = '30000000-0000-4000-8000-000000000006';
 select * from finish(true);

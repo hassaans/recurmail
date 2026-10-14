@@ -44,7 +44,9 @@ jobs:
       - name: Run pgTAP database tests
         run: supabase test db supabase/tests/rls.test.sql
       - name: Run sender database tests
-        run: docker exec -i -u postgres supabase_db_recurmail psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f - < supabase/tests/sender.test.sql
+        run: supabase test db supabase/tests/sender.test.sql
+      - name: Verify concurrent sender claims
+        run: bash supabase/tests/sender-concurrency.sh
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
