@@ -18,6 +18,9 @@
   margin-inline: auto;
 }
 .header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   padding-block: 24px;
 }
 .logo {
@@ -103,9 +106,22 @@
   outline-offset: 4px;
 }
 .footer {
-  padding-bottom: 32px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 20px 0 32px;
+  border-top: 1px solid #d5e8dd;
   font-size: 13px;
   color: #6e6886;
+}
+.footer nav {
+  display: flex;
+  gap: 12px;
+}
+.footer p {
+  margin: 0;
 }
 .skip {
   position: absolute;

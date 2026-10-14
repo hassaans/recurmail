@@ -46,6 +46,7 @@ export default async function Dashboard({
         <a className={styles.logo} href="/">
           RecurMail
         </a>
+        {user ? <a href="/settings">Settings</a> : null}
       </header>
       <main id="main" className={styles.main}>
         <p className={styles.eyebrow}>Send from your own Gmail</p>
@@ -140,8 +141,15 @@ export default async function Dashboard({
         </section>
       </main>
       <footer className={styles.footer}>
-        Gmail is a trademark of Google LLC. RecurMail is not affiliated with
-        Google.
+        <nav aria-label="Legal">
+          <a href="/privacy">Privacy</a>
+          {" · "}
+          <a href="/terms">Terms</a>
+        </nav>
+        <p>
+          Gmail is a trademark of Google LLC. RecurMail is not affiliated with
+          Google.
+        </p>
       </footer>
     </div>
   );

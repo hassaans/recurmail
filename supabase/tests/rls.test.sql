@@ -1,7 +1,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(14);
+select plan(17);
 
 insert into auth.users (id, email, aud, role) values
   ('00000000-0000-4000-8000-000000000001', 'rls-a@example.test', 'authenticated', 'authenticated'),
@@ -19,6 +19,9 @@ insert into public.schedules (
 ) values
   ('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'A schedule', 'A body', array['a@example.test'], 'FREQ=DAILY', 'UTC', now(), 'active', 'web'),
   ('10000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000002', 'B schedule', 'B body', array['b@example.test'], 'FREQ=DAILY', 'UTC', now(), 'active', 'web');
+
+insert into public.reconnect_email_outbox (user_id, recipient, reconnect_url)
+values ('00000000-0000-4000-8000-000000000002', 'b@example.test', 'https://app.test/reconnect');
 
 insert into public.send_log (
   id, schedule_id, user_id, scheduled_for, attempted_at, status
@@ -41,6 +44,11 @@ select throws_ok(
   '42501', null, 'user A cannot update their encrypted refresh token'
 );
 select is((select count(*) from public.send_log), 1::bigint, 'user A sees only their send history');
+select is((
+  select count(*) from information_schema.columns
+  where table_schema = 'public' and table_name = 'send_log'
+    and column_name in ('subject', 'body', 'body_text', 'body_html', 'recipient', 'to', 'cc', 'bcc')
+), 0::bigint, 'send_log has no subject, body, or recipient columns');
 select throws_ok(
   $$insert into public.schedules (user_id, subject, body_text, "to", rrule, timezone, next_send_at, status, source)
     values ('00000000-0000-4000-8000-000000000002', 'forbidden', 'body', array['b@example.test'], 'FREQ=DAILY', 'UTC', now(), 'active', 'web')$$,
@@ -71,14 +79,16 @@ delete from public.schedules where id = '10000000-0000-4000-8000-000000000001';
 select is(
   (select count(*) from public.schedules
     where id = '10000000-0000-4000-8000-000000000001'),
-  0::bigint, 'user A can delete their own schedule'
+  0::bigint, 'user A can delete their own schedule and its email content'
 );
+select is((select count(*) from public.send_log where schedule_id = '10000000-0000-4000-8000-000000000001'), 0::bigint, 'deleting a schedule cascades to its send history');
 reset role;
 
 delete from auth.users where id = '00000000-0000-4000-8000-000000000002';
 select is((select count(*) from public.gmail_connections where user_id = '00000000-0000-4000-8000-000000000002'), 0::bigint, 'deleting a user cascades to Gmail connections');
 select is((select count(*) from public.schedules where user_id = '00000000-0000-4000-8000-000000000002'), 0::bigint, 'deleting a user cascades to schedules');
 select is((select count(*) from public.send_log where user_id = '00000000-0000-4000-8000-000000000002'), 0::bigint, 'deleting a user cascades to send history');
+select is((select count(*) from public.reconnect_email_outbox where user_id = '00000000-0000-4000-8000-000000000002'), 0::bigint, 'deleting a user cascades to reconnect email data');
 
 select * from finish();
 rollback;

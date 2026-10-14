@@ -9,6 +9,34 @@ export interface Session {
   refreshToken: string;
   expiresAt: number;
 }
+export interface SupabaseAdmin {
+  deleteUser(userId: string): Promise<void>;
+}
+
+export function createSupabaseAdmin(config: {
+  url: string;
+  serviceKey: string;
+  fetcher?: typeof fetch;
+}): SupabaseAdmin {
+  const fetcher = config.fetcher ?? fetch;
+  return {
+    async deleteUser(userId) {
+      const response = await fetcher(
+        config.url + "/auth/v1/admin/users/" + encodeURIComponent(userId),
+        {
+          method: "DELETE",
+          headers: {
+            apikey: config.serviceKey,
+            Authorization: "Bearer " + config.serviceKey,
+          },
+          cache: "no-store",
+        },
+      );
+      if (!response.ok) throw new Error("Account deletion failed");
+    },
+  };
+}
+
 export interface SupabaseAuth {
   authorizationUrl(redirectUri: string, challenge: string): string;
   exchangeCode(code: string, verifier: string): Promise<Session>;
