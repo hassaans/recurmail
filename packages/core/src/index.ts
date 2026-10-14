@@ -11,3 +11,5 @@ export type { Mailbox, MimeMessage, NamedMailbox } from "./mime.ts";
 export { buildMime } from "./mime.ts";
 export type { PresetTime, Weekday } from "./schedule.ts";
 export { nextOccurrence, presets } from "./schedule.ts";
+
+export { type SentryEvent, scrubSentryEvent } from "./sentry-scrub.ts";

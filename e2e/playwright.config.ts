@@ -35,6 +35,7 @@ export default defineConfig({
         GOOGLE_CLIENT_ID: "fake-google-client",
         GOOGLE_CLIENT_SECRET: "fake-google-secret",
         TOKEN_ENCRYPTION_KEY: testEncryptionKey,
+        ADMIN_EMAILS: "admin@example.test",
         RECURMAIL_TEST_OAUTH_ORIGIN: fakeSupabaseUrl,
       },
     },

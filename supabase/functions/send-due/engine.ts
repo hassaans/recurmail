@@ -44,6 +44,11 @@ export type SenderStore = {
     recipient: string;
     reconnectUrl: string;
   }): Promise<void>;
+  failureMetrics?(): Promise<{
+    failed: number;
+    attempted: number;
+    rate: number;
+  }>;
   heartbeat(input: {
     id: string;
     startedAt: string;
@@ -54,6 +59,9 @@ export type SenderStore = {
     deferred: number;
     noticesSent: number;
     noticesFailed: number;
+    failureRateLastHour: number | null;
+    failedLastHour: number | null;
+    attemptedLastHour: number | null;
   }): Promise<void>;
 };
 
@@ -327,6 +335,18 @@ export async function runSender(
     };
   } finally {
     const finishedAt = now();
+    let failureMetrics: {
+      failed: number;
+      attempted: number;
+      rate: number;
+    } | null = null;
+    try {
+      if (store.failureMetrics) failureMetrics = await store.failureMetrics();
+    } catch (error) {
+      console.error("sender failure-rate query failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     await store.heartbeat({
       id: crypto.randomUUID(),
       startedAt: startedAt.toISOString(),
@@ -337,6 +357,9 @@ export async function runSender(
       deferred,
       noticesSent,
       noticesFailed,
+      failureRateLastHour: failureMetrics?.rate ?? null,
+      failedLastHour: failureMetrics?.failed ?? null,
+      attemptedLastHour: failureMetrics?.attempted ?? null,
     });
   }
 }

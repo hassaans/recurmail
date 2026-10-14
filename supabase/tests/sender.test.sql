@@ -1,7 +1,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(16);
+select plan(20);
 
 insert into auth.users (id, email, aud, role) values
   ('00000000-0000-4000-8000-000000000006', 'sender@example.test', 'authenticated', 'authenticated');
@@ -18,6 +18,9 @@ commit;
 begin;
 
 select ok(pg_get_functiondef('public.claim_due_schedules(integer)'::regprocedure) ilike '%skip locked%', 'claim function uses SKIP LOCKED');
+select is(has_function_privilege('anon', 'public.get_admin_metrics()', 'EXECUTE'), false, 'anon cannot read admin metrics');
+select is(has_function_privilege('authenticated', 'public.get_admin_metrics()', 'EXECUTE'), false, 'signed-in users cannot read admin metrics');
+select is(has_function_privilege('service_role', 'public.get_admin_metrics()', 'EXECUTE'), true, 'service role can read admin metrics');
 select is((select schedule_id from public.claim_due_schedules(1)), '10000000-0000-4000-8000-000000000006'::uuid, 'first claim takes the earliest due schedule');
 select is((select schedule_id from public.claim_due_schedules(1)), '10000000-0000-4000-8000-000000000007'::uuid, 'second claim takes the next due schedule');
 select is((select count(*) from public.claim_due_schedules(1)), 1::bigint, 'third claim gets the remaining schedule');
@@ -58,6 +61,7 @@ select is((select count(*) from public.reconnect_email_outbox where user_id = '0
 insert into public.sender_heartbeats (id, started_at, finished_at, claimed_count, sent_count, failed_count, deferred_count)
 values ('30000000-0000-4000-8000-000000000006', now() - interval '1 second', now(), 3, 1, 1, 1);
 select is((select count(*) from public.sender_heartbeats where claimed_count = 3 and sent_count = 1 and failed_count = 1 and deferred_count = 1), 1::bigint, 'sender run writes heartbeat counts');
+select is((public.get_admin_metrics()->>'failure_rate_last_hour')::numeric, 0.5::numeric, 'admin failure rate uses failed over sent and failed attempts from the last hour');
 
 delete from auth.users where id = '00000000-0000-4000-8000-000000000006';
 delete from public.sender_heartbeats where id = '30000000-0000-4000-8000-000000000006';
