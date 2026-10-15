@@ -111,6 +111,9 @@ test("legal pages name the operator and both contact addresses, and every footer
     await page.goto(path);
     const main = page.getByRole("main");
     await expect(main).toContainText("RecurMail is run by Hassaan Saleem.");
+    await expect(page.locator("body")).toContainText(
+      "Last updated October 15, 2026",
+    );
     await expect(main).not.toContainText("placeholder");
     await expect(
       main.getByRole("link", { name: "support@recurmail.com" }),
