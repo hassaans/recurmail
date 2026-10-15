@@ -137,3 +137,20 @@ test("legal pages name the operator and the support, privacy and legal addresses
     ).toHaveAttribute("href", "mailto:support@recurmail.com");
   }
 });
+
+test("legal pages fit a phone screen without sideways scrolling", async ({
+  page,
+}) => {
+  for (const path of ["/privacy", "/terms"]) {
+    for (const width of [375, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(path);
+      await page.evaluate(() => document.fonts.ready);
+      const pageWidths = await page.evaluate(() => ({
+        document: document.documentElement.scrollWidth,
+        viewport: document.documentElement.clientWidth,
+      }));
+      expect(pageWidths.document).toBeLessThanOrEqual(pageWidths.viewport);
+    }
+  }
+});
