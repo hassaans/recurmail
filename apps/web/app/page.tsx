@@ -117,7 +117,7 @@ h1, h2, h3 { margin: 0; font-family: var(--rm-font-display); font-weight: 800; l
 h1 { font-size: clamp(40px, 6vw, 68px); }
 h2 { font-size: clamp(30px, 4vw, 44px); }
 h3 { font-size: 22px; letter-spacing: -0.01em; line-height: 1.2; }
-p { margin: 0; color: var(--rm-ink-2); }
+p, .p { margin: 0; color: var(--rm-ink-2); }
 section { padding: 88px 0; }
 .band { border-block: 1px solid var(--rm-line); background: var(--rm-bg-2); }
 .skip-link { position: absolute; z-index: 20; top: 12px; left: -9999px; padding: 10px 14px; border-radius: var(--rm-radius-sm); background: var(--rm-paper); }
@@ -160,12 +160,12 @@ section { padding: 88px 0; }
 .sent-toast { position: absolute; right: 0; bottom: 0; display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: var(--rm-radius-pill); background: var(--rm-ink); box-shadow: var(--rm-shadow); color: var(--rm-bg); font-size: 14px; font-weight: 500; }
 .sent-toast b { color: var(--rm-sun); font-weight: 600; }
 .section-head { max-width: 680px; margin-bottom: 44px; }
-.section-head p { margin-top: 14px; font-size: 18px; }
+.section-head .p { margin-top: 14px; font-size: 18px; }
 .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
 .steps li { min-width: 0; padding: 28px 26px 30px; border: 1px solid var(--rm-line); border-radius: var(--rm-radius); background: var(--rm-paper); counter-increment: step; }
 .steps li::before { display: grid; width: 44px; height: 44px; margin-bottom: 18px; place-items: center; border-radius: 50%; background: var(--rm-grape); color: #fff; content: counter(step); font: 700 22px/1 var(--rm-font-display); }
 .steps h3 { margin-bottom: 8px; }
-.steps p, .way p { font-size: 16px; }
+.steps .p, .way .p { font-size: 16px; }
 .cal-grid, .ways { margin: 0; padding: 0; list-style: none; }
 .cal-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
 .cal { display: flex; min-width: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--rm-line); border-radius: var(--rm-radius); background: var(--rm-paper); }
@@ -190,7 +190,7 @@ section { padding: 88px 0; }
 .term-p { color: #c9b8ff; }
 .term-ok { color: var(--rm-sun); }
 .limit { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 48px; }
-.limit-copy p { margin-top: 16px; font-size: 18px; }
+.limit-copy .p { margin-top: 16px; font-size: 18px; }
 .meter-card { padding: 26px; border: 1px solid var(--rm-line); border-radius: var(--rm-radius); background: var(--rm-paper); box-shadow: var(--rm-shadow); }
 .meter-card h3 { margin-bottom: 14px; font: 600 18px/1.3 var(--rm-font-body); }
 .meter { height: 14px; overflow: hidden; border: 1px solid var(--rm-line); border-radius: var(--rm-radius-pill); background: var(--rm-bg-2); }
@@ -211,14 +211,14 @@ section { padding: 88px 0; }
 .faq summary::-webkit-details-marker { display: none; }
 .faq summary::after { color: var(--rm-grape); content: "+"; font: 28px/1 var(--rm-font-display); }
 .faq details[open] summary::after { transform: rotate(45deg); }
-.faq details p { padding: 0 0 20px; font-size: 16px; }
+.faq details .p { padding: 0 0 20px; font-size: 16px; }
 .guide-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .guide-link { display: block; min-width: 0; padding: 22px; border: 1px solid var(--rm-line); border-radius: var(--rm-radius); background: var(--rm-paper); text-decoration: none; }
 .guide-link h3 { margin-bottom: 8px; font-size: 19px; }
-.guide-link p { font-size: 15px; }
+.guide-link .p { font-size: 15px; }
 .closing { margin: 0 0 88px; padding: 64px 48px; border-radius: 28px; background: var(--rm-grape); color: #fff; text-align: center; }
 .closing h2 { color: #fff; }
-.closing p { max-width: 560px; margin: 16px auto 28px; color: #e7deff; font-size: 19px; }
+.closing .p { max-width: 560px; margin: 16px auto 28px; color: #e7deff; font-size: 19px; }
 .closing .btn { background: var(--rm-sun); color: var(--rm-ink); }
 .closing .btn:hover { background: #ffe27a; }
 footer { padding: 32px 0 48px; border-top: 1px solid var(--rm-line); color: var(--rm-muted); font-size: 14px; }
@@ -246,11 +246,11 @@ export default function HomePage() {
               <h1>
                 Send recurring emails from <em>your own Gmail.</em>
               </h1>
-              <p className="lede">
+              <div className="p lede">
                 Write the email once and pick a schedule. RecurMail sends it
                 from your Gmail address each time, so it appears in Sent and
                 replies come back to you. It is free to use.
-              </p>
+              </div>
               <div className="hero-cta">
                 <a className="btn btn-primary" href="/auth/signin">
                   Create free account
@@ -337,32 +337,32 @@ export default function HomePage() {
             <div className="section-head">
               <span className="eyebrow">How it works</span>
               <h2 id="how-title">How to send a recurring email from Gmail</h2>
-              <p>
+              <div className="p">
                 Gmail&apos;s Schedule send only sends one message once.
                 RecurMail adds a repeat schedule in three steps.
-              </p>
+              </div>
             </div>
             <ol className="steps">
               <li>
                 <h3>Connect your Gmail</h3>
-                <p>
+                <div className="p">
                   Sign in with Google and allow RecurMail to send email for you.
                   That is the only permission it requests.
-                </p>
+                </div>
               </li>
               <li>
                 <h3>Write the email</h3>
-                <p>
+                <div className="p">
                   Add recipients, Cc and Bcc, a subject, and your message. The
                   form works like the one you already know in Gmail.
-                </p>
+                </div>
               </li>
               <li>
                 <h3>Pick a schedule</h3>
-                <p>
+                <div className="p">
                   Choose when it repeats and which time zone to use. RecurMail
                   sends each message on time and keeps a history.
-                </p>
+                </div>
               </li>
             </ol>
           </div>
@@ -373,10 +373,10 @@ export default function HomePage() {
             <div className="section-head">
               <span className="eyebrow">Any schedule</span>
               <h2 id="schedule-title">Schedule an email for any pattern</h2>
-              <p>
+              <div className="p">
                 Weekly is easy. RecurMail also handles less common schedules and
                 adjusts for daylight saving time.
-              </p>
+              </div>
             </div>
             <ul className="cal-grid">
               <li className="cal">
@@ -436,27 +436,27 @@ export default function HomePage() {
             <div className="section-head">
               <span className="eyebrow">In your browser</span>
               <h2 id="ways-title">Manage recurring emails in one place</h2>
-              <p>
+              <div className="p">
                 Connect Gmail, write the message, choose a schedule, and review
                 your sent email from the RecurMail web app.
-              </p>
+              </div>
             </div>
             <ul className="ways">
               <li className="way">
                 <span className="tag">Web</span>
                 <h3>Keep your schedules together</h3>
-                <p>
+                <div className="p">
                   Review upcoming sends, update a message, or pause a schedule
                   when your plans change.
-                </p>
+                </div>
               </li>
               <li className="way">
                 <span className="tag">Send history</span>
                 <h3>Check what has gone out</h3>
-                <p>
+                <div className="p">
                   RecurMail keeps a history of messages it sends so you can
                   confirm the date and destination.
-                </p>
+                </div>
               </li>
             </ul>
           </div>
@@ -471,17 +471,17 @@ export default function HomePage() {
               <h2 id="limit-title">
                 Stay under Gmail&apos;s daily sending limit
               </h2>
-              <p>
+              <div className="p">
                 Personal Gmail can send to about 500 recipients a day. Google
                 Workspace can send to about 2,000. Recipients in To, Cc, and Bcc
                 all count.
-              </p>
-              <p>
+              </div>
+              <div className="p">
                 RecurMail totals the recipients in your schedules, finds your
                 busiest 24 hours, and warns you as you approach the limit. If
                 Gmail turns a send away, RecurMail holds it and retries when
                 there is room.
-              </p>
+              </div>
             </div>
             <div className="meter-card">
               <h3>Your busiest 24 hours</h3>
@@ -511,10 +511,10 @@ export default function HomePage() {
             <div className="section-head">
               <span className="eyebrow">Google permissions</span>
               <h2 id="privacy-title">RecurMail only asks to send email</h2>
-              <p>
+              <div className="p">
                 RecurMail asks Google for permission to send email on your
                 behalf. It does not request access to your mailbox.
-              </p>
+              </div>
             </div>
             <div className="privacy">
               <div className="priv">
@@ -536,11 +536,11 @@ export default function HomePage() {
                 </ul>
               </div>
             </div>
-            <p className="fine">
+            <div className="p fine">
               Gmail refresh tokens are encrypted at rest. You can disconnect
               RecurMail from your Google account settings, and your schedules
               will pause.
-            </p>
+            </div>
           </div>
         </section>
 
@@ -554,7 +554,7 @@ export default function HomePage() {
               {faqs.map(({ question, answer }, index) => (
                 <details key={question} open={index === 0}>
                   <summary>{question}</summary>
-                  <p>{answer}</p>
+                  <div className="p">{answer}</div>
                 </details>
               ))}
             </div>
@@ -566,28 +566,28 @@ export default function HomePage() {
             <div className="section-head">
               <span className="eyebrow">Gmail guides</span>
               <h2 id="guides-title">More on recurring email</h2>
-              <p>
+              <div className="p">
                 Learn what Gmail can schedule and how recurring email tools
                 work.
-              </p>
+              </div>
             </div>
             <div className="guide-links">
               <a className="guide-link" href="/guides/recurring-email-gmail">
                 <h3>How to send recurring email in Gmail</h3>
-                <p>
+                <div className="p">
                   See the options in Gmail and how to repeat a message on a
                   schedule.
-                </p>
+                </div>
               </a>
               <a
                 className="guide-link"
                 href="/guides/gmail-recurring-email-extension-alternative"
               >
                 <h3>A recurring email extension alternative</h3>
-                <p>
+                <div className="p">
                   Compare browser extensions with a service that sends from your
                   Gmail account.
-                </p>
+                </div>
               </a>
             </div>
           </div>
@@ -596,7 +596,9 @@ export default function HomePage() {
         <div className="wrap">
           <div className="closing">
             <h2>Set up a message to repeat</h2>
-            <p>Choose the recipients, write the email, and set its schedule.</p>
+            <div className="p">
+              Choose the recipients, write the email, and set its schedule.
+            </div>
             <a className="btn" href="/auth/signin">
               Create free account
             </a>
