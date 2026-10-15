@@ -155,8 +155,7 @@
   color: var(--rm-ink);
 }
 .field input,
-.field select,
-.field textarea {
+.field select {
   width: 100%;
   min-width: 0;
   min-height: 48px;
@@ -168,8 +167,7 @@
   font: inherit;
 }
 .field input:focus,
-.field select:focus,
-.field textarea:focus {
+.field select:focus {
   outline: none;
   border-color: var(--rm-grape);
   box-shadow: var(--rm-ring);
@@ -177,16 +175,8 @@
 .field input[type="time"] {
   font-variant-numeric: tabular-nums;
 }
-.field textarea {
-  resize: vertical;
-}
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 15px;
-}
 .invalid,
-.field input.invalid,
-.field textarea.invalid {
+.field input.invalid {
   border-color: var(--rm-danger);
 }
 .fieldError {
@@ -329,13 +319,16 @@
 .segment input,
 .day input {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
   opacity: 0;
-  cursor: pointer;
-  appearance: none;
+  pointer-events: none;
 }
 .segment span {
   display: grid;
@@ -360,6 +353,9 @@
   font-size: 15px;
   font-weight: 700;
 }
+.day:hover span {
+  border-color: var(--rm-grape);
+}
 .segment input:checked + span {
   background: var(--rm-paper);
   color: var(--rm-grape-dark);
@@ -382,9 +378,6 @@
   min-width: 0;
   aspect-ratio: 1;
 }
-.day input:hover + span {
-  border-color: var(--rm-grape);
-}
 .day input:checked + span {
   border-color: var(--rm-grape);
   background: var(--rm-grape);
@@ -402,6 +395,115 @@
   display: grid;
   grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
   gap: 16px;
+}
+
+.builder {
+  display: grid;
+  gap: 16px;
+}
+.builderRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.builderRow input,
+.builderRow select,
+.modeRow input:not([type="radio"]),
+.modeRow select {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--rm-line-strong);
+  border-radius: var(--rm-radius-sm);
+  background: var(--rm-paper);
+  color: inherit;
+  font: inherit;
+}
+.builderRow input:focus,
+.builderRow select:focus,
+.modeRow select:focus {
+  outline: none;
+  border-color: var(--rm-grape);
+  box-shadow: var(--rm-ring);
+}
+.builderRow select,
+.modeRow select {
+  width: auto;
+}
+.builderRow .selectWrap select,
+.modeRow .selectWrap select {
+  padding-right: 36px;
+}
+.builderRow .selectWrap::after,
+.modeRow .selectWrap::after {
+  right: 13px;
+}
+.builderRow .invalid {
+  border-color: var(--rm-danger);
+}
+.builderText {
+  color: var(--rm-ink-2);
+  font-size: 15px;
+  font-weight: 600;
+}
+.numberInput {
+  width: 84px;
+  font-variant-numeric: tabular-nums;
+}
+.dateInput {
+  min-width: 170px;
+  font-variant-numeric: tabular-nums;
+}
+.modeRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.modeRow + .modeRow {
+  margin-top: 8px;
+}
+.modeRow input[type="radio"] {
+  width: 20px;
+  height: 20px;
+  margin: 0 2px 0 0;
+  accent-color: var(--rm-grape);
+  cursor: pointer;
+}
+.modeRow input[type="radio"]:focus-visible {
+  outline: 3px solid var(--rm-grape);
+  outline-offset: 2px;
+}
+.modeRow select:disabled {
+  color: var(--rm-muted);
+  background: var(--rm-bg);
+  cursor: not-allowed;
+}
+.locked {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border: 1px dashed var(--rm-line-strong);
+  border-radius: var(--rm-radius-sm);
+  background: var(--rm-bg);
+}
+.locked p {
+  margin: 0;
+}
+.lockedTitle {
+  color: var(--rm-ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+.lockedSummary {
+  color: var(--rm-ink);
+  font-size: 17px;
+  line-height: 1.4;
+}
+.locked > div {
+  margin-top: 6px;
 }
 
 .summary {
@@ -632,6 +734,17 @@
   }
   .day {
     max-width: none;
+  }
+  .builderRow .selectWrap,
+  .modeRow .selectWrap {
+    flex: 1 1 140px;
+  }
+  .builderRow .selectWrap select,
+  .modeRow .selectWrap select {
+    width: 100%;
+  }
+  .dateInput {
+    flex: 1 1 170px;
   }
   .actions {
     position: sticky;
