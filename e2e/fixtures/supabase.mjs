@@ -185,12 +185,14 @@ function newScenario() {
       [reconnectAccount.id, reconnectAccount],
     ]),
     // The owner connected an account once and removed it again, so their
-    // schedules are paused with no sender, as the database leaves them.
+    // schedules are paused with no sender, as the database leaves them. The
+    // reconnect user's schedule is paused too: a failed send marks the
+    // account and pauses its schedules in the same step.
     schedules: [
       newSchedule(owner, "paused"),
       newSchedule(owner, "paused"),
       newSchedule(connected, "active", connectedAccount.id),
-      newSchedule(reconnect, "active", reconnectAccount.id),
+      newSchedule(reconnect, "paused", reconnectAccount.id),
     ],
     sendLogs: [],
     revokedTokens: [],

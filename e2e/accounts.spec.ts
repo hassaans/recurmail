@@ -507,6 +507,9 @@ test("reconnecting saves whichever account Google granted, then re-granting the 
     .getByRole("region", { name: "Gmail account", exact: true })
     .getByRole("alert");
   await expect(banner).toContainText("Gmail needs reconnecting");
+  await expect(banner).toContainText(
+    "Reconnect Gmail, then resume the schedules it paused.",
+  );
   const hinted = accountRow(page, scenario.reconnect.email);
   await expect(hinted).toContainText("Needs reconnect");
   const row = scheduleCard(page, "Fixture reminder");
@@ -545,7 +548,8 @@ test("reconnecting saves whichever account Google granted, then re-granting the 
   );
 
   // Granting the hinted account itself updates that row: a fresh token,
-  // connected again, no duplicate, and its schedule is active again.
+  // connected again, no duplicate. The schedule the failed send paused stays
+  // paused, as the banner said, until the user resumes it.
   await grant(request, scenario, scenario.reconnect.email);
   await hinted.getByRole("button", { name: "Reconnect", exact: true }).click();
   await expect(page).toHaveURL(
@@ -554,7 +558,8 @@ test("reconnecting saves whichever account Google granted, then re-granting the 
   await expect(accountsRegion(page).getByRole("listitem")).toHaveCount(2);
   await expect(hinted).toContainText("Connected");
   await expect(hinted).not.toContainText("Needs reconnect");
-  await expect(row).toContainText("Status Active");
+  await expect(row).toContainText("Status Paused");
+  await expect(row).toContainText("Paused. Won't send until you resume.");
   const afterHinted = await snapshot(request, scenario);
   const updated = mine(afterHinted).find(
     (row) => row.google_email === scenario.reconnect.email,
@@ -565,4 +570,24 @@ test("reconnecting saves whichever account Google granted, then re-granting the 
   });
   expect(updated?.encrypted_refresh_token).not.toBe("fixture-ciphertext");
   expect(mine(afterHinted)).toHaveLength(2);
+  const theirs = (snap: Snapshot) =>
+    snap.schedules.filter((row) => row.user_id === scenario.reconnect.id);
+  expect(theirs(afterHinted)).toHaveLength(1);
+  expect(theirs(afterHinted)[0]).toMatchObject({
+    status: "paused",
+    gmail_connection_id: scenario.connectionIds.reconnect,
+  });
+
+  // The callback redirect is a full page load, so retry the click until the
+  // row reports active and a click before hydration is not lost.
+  await expect(async () => {
+    const resume = row.getByRole("button", { name: "Resume", exact: true });
+    if (await resume.count()) await resume.click({ timeout: 1000 });
+    await expect(row).toContainText("Status Active", { timeout: 1000 });
+  }).toPass();
+  await expect(row).toContainText("Next send");
+  expect(theirs(await snapshot(request, scenario))[0]).toMatchObject({
+    status: "active",
+    gmail_connection_id: scenario.connectionIds.reconnect,
+  });
 });

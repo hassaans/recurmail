@@ -285,6 +285,65 @@ describe("connection persistence honors column grants and user isolation", () =>
     expect(fetcher.mock.calls[0][1].method).toBe("GET");
   });
 
+  it("gives the row a concurrent consent inserted first this token instead of failing", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json([]))
+      .mockResolvedValueOnce(
+        Response.json(
+          { code: "23505", message: "duplicate key value" },
+          { status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json([{ id: personal, google_email: "Owner@gmail.com" }]),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await store(fetcher).save(connection);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual([
+      "GET",
+      "POST",
+      "GET",
+      "PATCH",
+    ]);
+    expect(new URL(fetcher.mock.calls[2][0]).searchParams.get("user_id")).toBe(
+      "eq.owner",
+    );
+    const [url, init] = fetcher.mock.calls[3];
+    expect(new URL(url).searchParams.get("id")).toBe("eq." + personal);
+    expect(new URL(url).searchParams.get("user_id")).toBe("eq.owner");
+    expect(init.headers).toEqual(service);
+    expect(JSON.parse(init.body)).toEqual({
+      google_email: "owner@gmail.com",
+      is_workspace: false,
+      encrypted_refresh_token: "v1.encrypted",
+      status: "connected",
+      connected_at: "2026-10-14",
+    });
+  });
+
+  it("fails a conflict that no row explains, and does not retry other refusals", async () => {
+    const unexplained = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json([]))
+      .mockResolvedValueOnce(new Response(null, { status: 409 }))
+      .mockResolvedValueOnce(Response.json([]));
+    await expect(store(unexplained).save(connection)).rejects.toThrow(
+      "Connection storage failed",
+    );
+    expect(unexplained).toHaveBeenCalledTimes(3);
+    expect(unexplained.mock.calls[2][1].method).toBe("GET");
+    const refused = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json([]))
+      .mockResolvedValueOnce(new Response(null, { status: 400 }));
+    await expect(store(refused).save(connection)).rejects.toThrow(
+      "Connection storage failed",
+    );
+    expect(refused).toHaveBeenCalledTimes(2);
+  });
+
   it("pauses only that account's schedules before deleting it by id and owner", async () => {
     const fetcher = vi
       .fn()
