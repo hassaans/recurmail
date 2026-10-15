@@ -1,6 +1,8 @@
 export type SenderHandlerOptions = {
   getCronSecret: () => string | undefined;
-  execute: () => Promise<Record<string, number | string>>;
+  execute: (request: {
+    source: string | null;
+  }) => Promise<Record<string, number | string>>;
 };
 
 export function createSenderHandler(options: SenderHandlerOptions) {
@@ -21,12 +23,27 @@ export function createSenderHandler(options: SenderHandlerOptions) {
     if (!provided || !(await constantTimeEqual(provided, expected)))
       return Response.json({ error: "unauthorized" }, { status: 401 });
     try {
-      return Response.json(await options.execute());
+      return Response.json(
+        await options.execute({ source: await requestSource(request) }),
+      );
     } catch (error) {
       console.error("send-due failed", error);
       return Response.json({ error: "sender_failed" }, { status: 500 });
     }
   };
+}
+
+async function requestSource(request: Request): Promise<string | null> {
+  try {
+    const body: unknown = await request.json();
+    if (body && typeof body === "object" && "source" in body) {
+      const { source } = body as { source: unknown };
+      if (typeof source === "string") return source;
+    }
+  } catch {
+    // A missing or malformed body still runs the sender.
+  }
+  return null;
 }
 
 async function constantTimeEqual(
