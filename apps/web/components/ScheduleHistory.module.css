@@ -1,0 +1,128 @@
+.back {
+  display: inline-block;
+  margin: 0 0 14px;
+  color: var(--rm-ink-2);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.back:hover {
+  color: var(--rm-grape-dark);
+}
+.header {
+  margin: 0 0 28px;
+  padding: 24px 28px;
+  border: 1px solid var(--rm-line);
+  border-radius: var(--rm-radius);
+  background: var(--rm-paper);
+}
+.titleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+}
+.title {
+  display: flex;
+  flex: 1 1 320px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  min-width: 0;
+}
+.title h1 {
+  margin: 0;
+  font: 800 clamp(24px, 4vw, 32px) / 1.15 var(--rm-font-display);
+  letter-spacing: -0.03em;
+  overflow-wrap: anywhere;
+}
+.eyebrow {
+  margin: 0 0 6px;
+  color: var(--rm-grape-dark);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px 24px;
+  margin: 20px 0 0;
+  padding: 18px 0 0;
+  border-top: 1px dashed var(--rm-line);
+}
+.facts dt {
+  color: var(--rm-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.facts dd {
+  margin: 4px 0 0;
+  color: var(--rm-ink);
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.section h2 {
+  margin: 0 0 14px;
+  font: 800 22px / 1.2 var(--rm-font-display);
+  letter-spacing: -0.02em;
+}
+.list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.entry {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 6px 18px;
+  align-items: start;
+  padding: 14px 18px;
+  border: 1px solid var(--rm-line);
+  border-radius: var(--rm-radius-sm);
+  background: var(--rm-paper);
+}
+.entry time {
+  font-weight: 600;
+}
+.entry p {
+  grid-column: 2;
+  margin: 0;
+  color: var(--rm-ink-2);
+  font-size: 15px;
+}
+.entry .scheduled {
+  color: var(--rm-muted);
+  font-size: 14px;
+}
+.empty {
+  padding: 28px;
+  border: 1px dashed #b9d6c6;
+  border-radius: var(--rm-radius);
+  background: var(--rm-paper);
+  color: var(--rm-ink-2);
+  text-align: center;
+}
+.empty p {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .header {
+    padding: 20px 18px;
+  }
+  .entry {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .entry p {
+    grid-column: 1;
+  }
+}

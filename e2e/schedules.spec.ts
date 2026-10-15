@@ -192,7 +192,11 @@ test("weekly Monday editor saves and dashboard shows the next Monday", async ({
   expect(saved.body.schedules).toHaveLength(1);
   const nextMonday = new Date(saved.body.schedules[0].next_send_at);
   expect(nextMonday.getUTCDay()).toBe(1);
-  await expect(page.getByText(/Next send.*Monday/i)).toBeVisible();
+  const card = page
+    .getByRole("listitem")
+    .filter({ hasText: "Monday check-in" });
+  await expect(card).toContainText("Next send");
+  await expect(card.locator("time")).toHaveText(/^Mon, .* at 9:15 AM /);
 });
 
 test("schedule editor fits a 375px viewport without horizontal overflow", async ({
@@ -274,7 +278,13 @@ test("dashboard summarizes schedules and pause-all pauses every active schedule"
   const deleteButton = secondRow.getByRole("button", { name: "Delete" });
   await expect(deleteButton).toBeEnabled();
   await deleteButton.click();
+  const confirmDelete = page.getByRole("dialog", {
+    name: "Delete this schedule?",
+  });
+  await expect(confirmDelete).toContainText("Second reminder");
+  await confirmDelete.getByRole("button", { name: "Delete schedule" }).click();
   await expect(secondRow).toHaveCount(0);
+  await expect(confirmDelete).toHaveCount(0);
 });
 
 test("schedule history shows sent and failed entries with plain-language reasons", async ({

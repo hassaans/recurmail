@@ -1,50 +1,77 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import {
+  recipientSummary,
+  type ScheduleSummary,
+  summarizeSchedule,
+} from "../lib/schedule-summary";
+import {
+  describeCadence,
+  formatScheduleTime,
+  repeatLabel,
+} from "../lib/schedule-time";
 import type { ScheduleRow } from "../lib/schedules";
+import ConfirmDialog from "./ConfirmDialog";
+import controls from "./controls.module.css";
 import styles from "./ScheduleList.module.css";
 
-export default function ScheduleList({ warning }: { warning?: string }) {
-  const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+export type ScheduleListProps = {
+  initialSchedules: ScheduleSummary[];
+  connectionStatus: "connected" | "needs_reconnect" | "disconnected";
+  loadError?: boolean;
+};
 
-  async function loadSchedules() {
+type StatusTone = "teal" | "muted" | "warn";
+
+function statusOf(
+  schedule: ScheduleSummary,
+  connectionStatus: ScheduleListProps["connectionStatus"],
+): { label: string; tone: StatusTone } {
+  if (schedule.status === "sending") return { label: "Sending", tone: "teal" };
+  if (schedule.status === "paused") return { label: "Paused", tone: "muted" };
+  if (connectionStatus === "needs_reconnect")
+    return { label: "Needs reconnect", tone: "warn" };
+  return { label: "Active", tone: "teal" };
+}
+
+const pillClass: Record<StatusTone, string> = {
+  teal: controls.pillTeal,
+  muted: controls.pillMuted,
+  warn: controls.pillWarn,
+};
+
+// The server renders the first list; this component owns pause, resume,
+// pause-all and delete, and confirms delete in a modal dialog.
+export default function ScheduleList({
+  initialSchedules,
+  connectionStatus,
+  loadError = false,
+}: ScheduleListProps) {
+  const [schedules, setSchedules] = useState(initialSchedules);
+  const [error, setError] = useState<string | null>(
+    loadError ? "Schedules could not be loaded. Refresh to try again." : null,
+  );
+  const [busy, setBusy] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<ScheduleSummary | null>(
+    null,
+  );
+  const canEdit = connectionStatus === "connected";
+
+  async function reload() {
     const response = await fetch("/api/schedules", {
       credentials: "same-origin",
     });
     if (!response.ok) throw new Error("Schedules could not be loaded.");
     const result = (await response.json()) as { schedules?: ScheduleRow[] };
-    setSchedules(result.schedules ?? []);
+    setSchedules((result.schedules ?? []).map(summarizeSchedule));
   }
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/schedules", { credentials: "same-origin" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Schedules could not be loaded.");
-        return (await response.json()) as { schedules?: ScheduleRow[] };
-      })
-      .then((result) => {
-        if (!cancelled) setSchedules(result.schedules ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setError("Schedules could not be loaded. Try again.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   async function mutate(
     path: string,
     method: "POST" | "DELETE",
     scheduleId?: string,
-  ) {
+  ): Promise<boolean> {
     setBusy(true);
     setError(null);
     try {
@@ -58,9 +85,10 @@ export default function ScheduleList({ warning }: { warning?: string }) {
           ? null
           : ((await response.json()) as { schedule?: ScheduleRow });
       if (result?.schedule) {
+        const updated = summarizeSchedule(result.schedule);
         setSchedules((current) =>
           current.map((schedule) =>
-            schedule.id === result.schedule?.id ? result.schedule : schedule,
+            schedule.id === updated.id ? updated : schedule,
           ),
         );
       } else if (method === "DELETE" && scheduleId) {
@@ -68,10 +96,12 @@ export default function ScheduleList({ warning }: { warning?: string }) {
           current.filter((schedule) => schedule.id !== scheduleId),
         );
       } else {
-        await loadSchedules();
+        await reload();
       }
+      return true;
     } catch {
       setError("That schedule could not be updated. Try again.");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -100,148 +130,151 @@ export default function ScheduleList({ warning }: { warning?: string }) {
     }
   }
 
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    const ok = await mutate(
+      `/api/schedules/${encodeURIComponent(pendingDelete.id)}`,
+      "DELETE",
+      pendingDelete.id,
+    );
+    if (ok) setPendingDelete(null);
+  }
+
+  const anyActive = schedules.some((schedule) => schedule.status === "active");
+
   return (
-    <section className={styles.section} aria-labelledby="schedules-title">
-      <div className={styles.heading}>
-        <h2 id="schedules-title">Your schedules</h2>
-        <a className={styles.button} href="/schedules/new">
-          New schedule
-        </a>
-        {schedules.some((schedule) => schedule.status === "active") ? (
-          <button
-            className={styles.secondaryButton}
-            type="button"
-            onClick={pauseAll}
-            disabled={busy}
-          >
-            Pause all schedules
-          </button>
-        ) : null}
-      </div>
-      {warning ? (
-        <p className={styles.warning} role="status">
-          {warning}
-        </p>
-      ) : null}
+    <section className={styles.section} aria-label="Schedules">
       {error ? (
-        <p className={styles.error} role="alert">
+        <p className={controls.error} role="alert">
           {error}
         </p>
       ) : null}
-      {loading ? (
-        <p role="status">Loading schedules…</p>
-      ) : schedules.length ? (
-        <ul className={styles.list}>
-          {schedules.map((schedule) => (
-            <li className={styles.row} key={schedule.id}>
-              <div>
-                <h3>{schedule.subject}</h3>
-                <p>{recipientSummary(schedule)}</p>
-                <p>{repeatSummary(schedule.rrule)}</p>
-                <p>
-                  Next send{" "}
-                  {new Intl.DateTimeFormat(undefined, {
-                    weekday: "long",
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  }).format(new Date(schedule.next_send_at))}
-                </p>
-                <p>
-                  Status <strong>{statusLabel(schedule.status)}</strong>
-                </p>
-              </div>
-              <div className={styles.actions}>
-                <a href={`/schedules/${encodeURIComponent(schedule.id)}`}>
-                  History
-                </a>
-                <button
-                  type="button"
-                  disabled={busy || schedule.status === "sending"}
-                  onClick={() =>
-                    mutate(
-                      `/api/schedules/${encodeURIComponent(schedule.id)}/${schedule.status === "active" ? "pause" : "resume"}`,
-                      "POST",
-                    )
-                  }
-                >
-                  {schedule.status === "active" ? "Pause" : "Resume"}
-                </button>
-                <a href={`/schedules/${encodeURIComponent(schedule.id)}/edit`}>
-                  Edit
-                </a>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    mutate(
-                      `/api/schedules/${encodeURIComponent(schedule.id)}`,
-                      "DELETE",
-                      schedule.id,
-                    )
-                  }
-                >
-                  Delete
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+      {schedules.length ? (
+        <>
+          <div className={styles.toolbar}>
+            <p className={styles.count}>
+              {schedules.length}{" "}
+              {schedules.length === 1 ? "schedule" : "schedules"}
+            </p>
+            {anyActive ? (
+              <button
+                className={`${controls.quiet} ${controls.small}`}
+                type="button"
+                onClick={pauseAll}
+                disabled={busy}
+              >
+                Pause all schedules
+              </button>
+            ) : null}
+          </div>
+          <ul className={styles.list}>
+            {schedules.map((schedule) => {
+              const status = statusOf(schedule, connectionStatus);
+              const id = encodeURIComponent(schedule.id);
+              return (
+                <li className={styles.card} key={schedule.id}>
+                  <div className={styles.strip}>
+                    {repeatLabel(schedule.rrule)}
+                  </div>
+                  <div className={styles.body}>
+                    <div className={styles.titleRow}>
+                      <h3 className={styles.subject}>{schedule.subject}</h3>
+                      <span className={controls.srOnly}>Status </span>
+                      <span
+                        className={`${controls.pill} ${pillClass[status.tone]}`}
+                      >
+                        {status.label}
+                      </span>
+                    </div>
+                    <p className={styles.meta}>
+                      {describeCadence(
+                        schedule.rrule,
+                        schedule.timezone,
+                        schedule.next_send_at,
+                      )}{" "}
+                      · {recipientSummary(schedule.recipients)}
+                    </p>
+                    <dl className={styles.facts}>
+                      <dt>Next send</dt>
+                      <dd>
+                        <time dateTime={schedule.next_send_at}>
+                          {formatScheduleTime(
+                            schedule.next_send_at,
+                            schedule.timezone,
+                          )}
+                        </time>
+                      </dd>
+                    </dl>
+                    <div className={styles.actions}>
+                      {canEdit ? (
+                        <a
+                          className={`${controls.secondary} ${controls.small}`}
+                          href={`/schedules/${id}/edit`}
+                        >
+                          Edit
+                        </a>
+                      ) : null}
+                      <a
+                        className={`${controls.secondary} ${controls.small}`}
+                        href={`/schedules/${id}`}
+                      >
+                        History
+                      </a>
+                      <button
+                        className={`${controls.secondary} ${controls.small}`}
+                        type="button"
+                        disabled={busy || schedule.status === "sending"}
+                        onClick={() =>
+                          mutate(
+                            `/api/schedules/${id}/${schedule.status === "active" ? "pause" : "resume"}`,
+                            "POST",
+                          )
+                        }
+                      >
+                        {schedule.status === "active" ? "Pause" : "Resume"}
+                      </button>
+                      <span className={styles.spacer} />
+                      <button
+                        className={`${controls.dangerQuiet} ${controls.small}`}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => setPendingDelete(schedule)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       ) : (
-        <p>No schedules yet. Create your first recurring email.</p>
+        <div className={styles.empty}>
+          <h3>No schedules yet</h3>
+          <p>
+            Create your first recurring email. RecurMail sends it from your own
+            Gmail account on the days and time you choose.
+          </p>
+          {canEdit ? (
+            <a className={controls.secondary} href="/schedules/new">
+              Create your first schedule
+            </a>
+          ) : null}
+        </div>
       )}
+      {pendingDelete ? (
+        <ConfirmDialog
+          open
+          title="Delete this schedule?"
+          description={`“${pendingDelete.subject}” will stop sending and its send history will be removed. This cannot be undone.`}
+          confirmLabel="Delete schedule"
+          tone="danger"
+          busy={busy}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={confirmDelete}
+        />
+      ) : null}
     </section>
   );
-}
-
-function recipientSummary(schedule: ScheduleRow): string {
-  const count = schedule.to.length + schedule.cc.length + schedule.bcc.length;
-  return `${count} ${count === 1 ? "recipient" : "recipients"}`;
-}
-
-function statusLabel(status: ScheduleRow["status"]): string {
-  return status === "sending"
-    ? "Sending"
-    : status === "active"
-      ? "Active"
-      : "Paused";
-}
-
-function repeatSummary(rule: string): string {
-  const content = rule.match(/(?:^|\n)RRULE:([^\n]+)/)?.[1] ?? rule;
-  const fields = Object.fromEntries(
-    content.split(";").map((part) => {
-      const [key, value] = part.split("=");
-      return [key, value];
-    }),
-  );
-  const interval = Number(fields.INTERVAL ?? "1");
-  const prefix = interval > 1 ? `Every ${interval} ` : "Every ";
-  if (fields.FREQ === "DAILY")
-    return interval > 1 ? `${prefix}days` : "Every day";
-  if (fields.FREQ === "WEEKLY") {
-    const days = (fields.BYDAY ?? "").split(",").filter(Boolean);
-    const names: Record<string, string> = {
-      MO: "Monday",
-      TU: "Tuesday",
-      WE: "Wednesday",
-      TH: "Thursday",
-      FR: "Friday",
-      SA: "Saturday",
-      SU: "Sunday",
-    };
-    const selected = days.map((day) => names[day]).filter(Boolean);
-    const cadence = interval > 1 ? `${prefix}weeks` : "Every week";
-    return selected.length
-      ? `${cadence} on ${selected.join(", ").replace(/, ([^,]+)$/, " and $1")}`
-      : cadence;
-  }
-  if (fields.FREQ === "MONTHLY")
-    return fields.BYMONTHDAY
-      ? `Every month on day ${fields.BYMONTHDAY}`
-      : "Every month";
-  if (fields.FREQ === "YEARLY") return "Every year";
-  return "Custom recurring schedule";
 }
