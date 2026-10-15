@@ -411,7 +411,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "No connected Gmail account (gmail_not_connected), or Gmail access has expired and must be reconnected from the dashboard (gmail_reconnect_required). On gmail_reconnect_required the connection is marked needs_reconnect and the owner's active schedules are paused, the same as when the sender hits the dead token; no send history is written and no reconnect email is queued.",
+            "description": "No connected Gmail account (gmail_not_connected), or Gmail access has expired and must be reconnected from the dashboard (gmail_reconnect_required). On gmail_reconnect_required the connection the test used is marked needs_reconnect and the schedules sending from it are paused, the same as when the sender hits the dead token; the owner's other accounts and schedules are untouched, no send history is written and no reconnect email is queued.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1031,7 +1031,7 @@
           "gmail_connection_id": {
             "type": "string",
             "format": "uuid",
-            "description": "Optional. Which of the owner's Gmail connections sends the test. Must belong to the owner; otherwise 409 gmail_not_connected."
+            "description": "Which of the owner's Gmail connections sends the test. The editor always sends the account chosen in its From field. Must belong to the owner; otherwise 409 gmail_not_connected. When omitted, the owner's oldest connected account is used."
           }
         }
       },

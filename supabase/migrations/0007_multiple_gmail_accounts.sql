@@ -197,6 +197,34 @@ begin
 end;
 $$;
 
+-- 7. A test send that hits a dead token marks only the account it used and
+-- pauses only the schedules sending from it; the user's other accounts keep
+-- sending. This replaces the per-user version from 0009, which marked every
+-- connection and paused every schedule. Live runs this file after 0009, so
+-- the drop removes that version here. A fresh database runs 0009 after this
+-- file and gets the per-user version back; 0010 removes it again.
+drop function if exists public.mark_test_send_reconnect_needed(uuid);
+create or replace function public.mark_test_send_reconnect_needed(
+  p_user_id uuid,
+  p_connection_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  update public.gmail_connections set status = 'needs_reconnect'
+    where id = p_connection_id and user_id = p_user_id and status = 'connected';
+  update public.schedules set status = 'paused', updated_at = now()
+    where gmail_connection_id = p_connection_id and user_id = p_user_id
+      and status in ('active', 'sending');
+end;
+$$;
+
+revoke all on function public.mark_test_send_reconnect_needed(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.mark_test_send_reconnect_needed(uuid, uuid) to service_role;
+
 revoke all on function public.claim_due_schedules(integer) from public, anon, authenticated;
 revoke all on function public.reclaim_stale_sending(interval) from public, anon, authenticated;
 revoke all on function public.mark_gmail_reconnect_needed(uuid, uuid, uuid, timestamptz, text, text) from public, anon, authenticated;
