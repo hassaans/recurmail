@@ -112,6 +112,7 @@ function newScenario() {
       newSchedule(owner),
       newSchedule(owner, "paused"),
       newSchedule(connected),
+      newSchedule(reconnect),
     ],
     sendLogs: [],
     revokedTokens: [],
