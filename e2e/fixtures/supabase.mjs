@@ -217,9 +217,7 @@ function newScenario() {
 
 /** Give the already-connected personal account a real, decryptable refresh token. */
 function connectForTestSend(scenario) {
-  const connection = scenario.connections.get(
-    scenario.connectionIds.connected,
-  );
+  const connection = scenario.connections.get(scenario.connectionIds.connected);
   connection.encrypted_refresh_token = encryptedToken(
     scenario.gmailRefreshToken,
     scenario.connected.id,
@@ -999,12 +997,32 @@ const server = createServer(async (req, res) => {
     if (!target) return reply(400, { error: "invalid owner filter" });
     if (url.pathname === "/rest/v1/gmail_connections") {
       const idFilter = url.searchParams.get("id");
-      if (idFilter !== null && !idFilter.startsWith("eq."))
+      const statusFilter = url.searchParams.get("status");
+      if (
+        (idFilter !== null && !idFilter.startsWith("eq.")) ||
+        (statusFilter !== null && !statusFilter.startsWith("eq."))
+      )
         return reply(400, { error: "unsupported connection filter" });
-      const rows = connectionsOf(target.scenario, target.user.id).filter(
-        (row) => idFilter === null || `eq.${row.id}` === idFilter,
+      let rows = connectionsOf(target.scenario, target.user.id).filter(
+        (row) =>
+          (idFilter === null || `eq.${row.id}` === idFilter) &&
+          (statusFilter === null || `eq.${row.status}` === statusFilter),
       );
       if (req.method === "GET") {
+        // The default test sender is the oldest connected account.
+        const order = url.searchParams.get("order");
+        if (order !== null && order !== "connected_at.asc,id.asc")
+          return reply(400, { error: "unsupported connection order" });
+        if (order !== null)
+          rows = [...rows].sort(
+            (a, b) =>
+              a.connected_at.localeCompare(b.connected_at) ||
+              a.id.localeCompare(b.id),
+          );
+        const limit = url.searchParams.get("limit");
+        if (limit !== null && !/^[1-9]\d*$/.test(limit))
+          return reply(400, { error: "unsupported connection limit" });
+        if (limit !== null) rows = rows.slice(0, Number(limit));
         const select = url.searchParams.get("select");
         const projections = {
           encrypted_refresh_token: idFilter === null,

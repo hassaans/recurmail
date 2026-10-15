@@ -265,6 +265,7 @@ describe("server/client prop boundaries", () => {
     ).toContain("Edit schedule");
     const editor = renderToString(
       createElement(ScheduleEditor, {
+        userEmail: "owner@example.test",
         accounts: [
           ...listProps.accounts,
           {

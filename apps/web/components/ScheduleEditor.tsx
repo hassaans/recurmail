@@ -28,8 +28,8 @@ import {
   WEEKDAYS,
   weekdaysFromRule,
 } from "../lib/schedule-editor";
-import { TEST_SEND_LIMIT } from "../lib/test-send-limit";
 import type { SenderAccount } from "../lib/schedule-summary";
+import { TEST_SEND_LIMIT } from "../lib/test-send-limit";
 import RecipientField, {
   emptyRecipients,
   invalidRecipientCount,

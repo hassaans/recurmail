@@ -20,8 +20,18 @@ interface GmailMessage {
   text: string;
 }
 interface ScenarioState {
-  connections: Array<{ user_id: string; status: string }>;
-  schedules: Array<{ id: string; user_id: string; status: string }>;
+  connections: Array<{
+    id: string;
+    user_id: string;
+    google_email: string;
+    status: string;
+  }>;
+  schedules: Array<{
+    id: string;
+    user_id: string;
+    gmail_connection_id: string | null;
+    status: string;
+  }>;
   sendLogs: unknown[];
   gmailMessages: GmailMessage[];
   testSends: Array<{ user_id: string; sent_at: string }>;
@@ -42,6 +52,58 @@ async function prepare(
     data ? { data } : undefined,
   );
   expect(response.status(), `${setup} setup`).toBe(200);
+}
+
+/** Give the owner a Gmail account: their own address, or a second work one. */
+async function connectOwner(
+  request: APIRequestContext,
+  scenarioId: string,
+  setup: "account-deletion" | "second-account",
+) {
+  const response = await request.post(
+    `${fakeSupabaseUrl}/__test/scenarios/${scenarioId}/${setup}`,
+  );
+  expect(response.status(), `${setup} setup`).toBe(200);
+  return (await response.json()) as { connection_id: string };
+}
+
+/** Save an active daily schedule through the API from the given account. */
+async function createSchedule(
+  page: Page,
+  subject: string,
+  connectionId: string,
+) {
+  const start = new Date(Date.now() + 3600000)
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
+  const result = await page.evaluate(
+    async ([subject, connectionId, start]) => {
+      const response = await fetch("/api/schedules", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject,
+          body_text: "A daily reminder.",
+          to: ["daily@example.test"],
+          rrule: `DTSTART:${start}\nRRULE:FREQ=DAILY`,
+          timezone: "UTC",
+          gmail_connection_id: connectionId,
+        }),
+      });
+      return {
+        status: response.status,
+        body: (await response.json()) as {
+          schedule?: { id: string; status: string };
+        },
+      };
+    },
+    [subject, connectionId, start] as const,
+  );
+  expect(result.status, subject).toBe(201);
+  expect(result.body.schedule?.status).toBe("active");
+  return result.body.schedule?.id as string;
 }
 
 async function readState(
@@ -297,17 +359,108 @@ test("asks the user to reconnect when Gmail access has expired", async ({
   await expect(
     banner.getByRole("button", { name: "Reconnect Gmail", exact: true }),
   ).toBeVisible();
-  // The schedule itself is paused now (the same state the sender leaves it in
-  // when it hits the dead token), so the row shows the paused state with a
-  // Resume action rather than the connection-only "Needs reconnect" label.
+  // The schedule is paused and its account needs reconnecting, so the card
+  // names the account to reconnect instead of offering a Resume that cannot
+  // work yet; Resume comes back once the account is reconnected.
   const row = page
     .getByRole("listitem")
     .filter({ hasText: "Fixture reminder" });
   await expect(row).toHaveCount(1);
-  await expect(row).toContainText("Status Paused");
-  await expect(row).toContainText("Paused. Won't send until you resume.");
-  await expect(row.getByRole("button", { name: "Resume" })).toBeVisible();
+  await expect(row).toContainText("Status Needs reconnect");
+  await expect(row).toContainText(
+    `Paused until you reconnect ${scenario.connected.email}.`,
+  );
+  await expect(row.getByRole("button", { name: "Resume" })).toHaveCount(0);
   await page.screenshot({ path: shot(testInfo, "dashboard-reconnect-1280") });
+});
+
+test("sends from the account chosen in From, and a dead token there leaves the other account alone", async ({
+  page,
+  context,
+  request,
+  scenario,
+}, testInfo) => {
+  // The owner has two accounts: their own address and a work one.
+  const personal = await connectOwner(request, scenario.id, "account-deletion");
+  const work = await connectOwner(request, scenario.id, "second-account");
+  await signIn(page, context, scenario.owner);
+  const personalSchedule = await createSchedule(
+    page,
+    "From the personal account",
+    personal.connection_id,
+  );
+  const workSchedule = await createSchedule(
+    page,
+    "From the work account",
+    work.connection_id,
+  );
+
+  await startDraft(page);
+  const from = page.getByRole("combobox", { name: "From" });
+  await expect(from).toHaveValue(personal.connection_id);
+  await expect(page.getByTestId("test-send")).toContainText(
+    `We'll send it to you at ${scenario.owner.email} from ${scenario.owner.email}.`,
+  );
+  await from.selectOption({ label: scenario.workEmail });
+  // The hint names the account the test will go out from.
+  await expect(page.getByTestId("test-send")).toContainText(
+    `We'll send it to you at ${scenario.owner.email} from ${scenario.workEmail}.`,
+  );
+  await testButton(page).scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: shot(testInfo, "second-account-hint-1280"),
+    fullPage: true,
+  });
+  await testButton(page).click();
+  await expect(successToast(page, scenario.owner.email)).toBeVisible();
+
+  // The email left from the work account and still only went to the owner.
+  const sent = await readState(request, scenario.id);
+  expect(sent.gmailMessages).toHaveLength(1);
+  expect(sent.gmailMessages[0].headers.from).toBe(scenario.workEmail);
+  expect(sent.gmailMessages[0].headers.to).toBe(scenario.owner.email);
+  expect(sent.gmailMessages[0].headers.subject).toBe(
+    "[Test] Quarterly numbers",
+  );
+
+  // Now the work account's token is dead. Only that account and the schedule
+  // sending from it are affected; the personal account keeps going.
+  await prepare(request, scenario.id, "expired-grant");
+  await testButton(page).click();
+  await expect(
+    page.getByRole("alert").filter({
+      hasText: `Gmail access for ${scenario.workEmail} has expired. Reconnect it from the dashboard.`,
+    }),
+  ).toBeVisible();
+  await testButton(page).scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: shot(testInfo, "second-account-expired-1280"),
+  });
+
+  const after = await readState(request, scenario.id);
+  expect(after.gmailMessages).toHaveLength(1);
+  const status = (id: string) =>
+    after.connections.find((row) => row.id === id)?.status;
+  expect(status(work.connection_id)).toBe("needs_reconnect");
+  expect(status(personal.connection_id)).toBe("connected");
+  const schedule = (id: string) => after.schedules.find((row) => row.id === id);
+  expect(schedule(workSchedule)).toMatchObject({
+    gmail_connection_id: work.connection_id,
+    status: "paused",
+  });
+  expect(schedule(personalSchedule)).toMatchObject({
+    gmail_connection_id: personal.connection_id,
+    status: "active",
+  });
+  // Nobody else's accounts or schedules moved.
+  const others = (state: ScenarioState) =>
+    state.connections
+      .filter((row) => row.user_id !== scenario.owner.id)
+      .map((row) => [row.id, row.status]);
+  expect(others(after)).toEqual(others(sent));
+  expect(
+    after.schedules.filter((row) => row.user_id !== scenario.owner.id),
+  ).toEqual(sent.schedules.filter((row) => row.user_id !== scenario.owner.id));
 });
 
 test("shows an error toast when Gmail rejects the send", async ({

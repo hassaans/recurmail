@@ -21,6 +21,7 @@ export const TEST_SUBJECT_PREFIX = "[Test] ";
 
 /** The Gmail account a test is sent from. Only the handler ever sees the token. */
 export interface TestSender {
+  id: string;
   email: string;
   is_workspace: boolean;
   status: string;
@@ -37,7 +38,11 @@ export type TestSendClaim =
   | { allowed: false; oldestSentAt: string };
 
 export interface TestSendStore {
-  /** The caller's Gmail connection, or the one matching `connectionId` when it belongs to them. */
+  /**
+   * The caller's connection matching `connectionId` when it belongs to them,
+   * whatever its status. Without an id, the caller's oldest connected account,
+   * which is the one the editor preselects.
+   */
   findConnection(
     userId: string,
     connectionId?: string,
@@ -51,11 +56,12 @@ export interface TestSendStore {
   /** Give a reservation back because the email did not go out. */
   release(userId: string, id: string): Promise<void>;
   /**
-   * The refresh token is dead: mark the connection needs_reconnect and pause
-   * the user's active schedules, in one transaction. No send_log row and no
-   * reconnect email; the user is already reading the message.
+   * The refresh token is dead: mark that one connection needs_reconnect and
+   * pause the schedules sending from it, in one transaction. The user's other
+   * accounts keep sending. No send_log row and no reconnect email; the user
+   * is already reading the message.
    */
-  markReconnectNeeded(userId: string): Promise<void>;
+  markReconnectNeeded(userId: string, connectionId: string): Promise<void>;
 }
 
 export class TestSendStorageError extends Error {
@@ -101,7 +107,9 @@ export function createTestSendStore(config: {
         "gmail_connections",
         {
           user_id: `eq.${userId}`,
-          ...(connectionId ? { id: `eq.${connectionId}` } : {}),
+          ...(connectionId
+            ? { id: `eq.${connectionId}` }
+            : { status: "eq.connected", order: "connected_at.asc,id.asc" }),
           select: "id,google_email,is_workspace,status,encrypted_refresh_token",
           limit: "1",
         },
@@ -115,12 +123,14 @@ export function createTestSendStore(config: {
       if (!row || typeof row !== "object") return null;
       const record = row as Record<string, unknown>;
       if (
+        typeof record.id !== "string" ||
         typeof record.google_email !== "string" ||
         typeof record.status !== "string" ||
         typeof record.encrypted_refresh_token !== "string"
       )
         throw new TestSendStorageError("read_connection");
       return {
+        id: record.id,
         email: record.google_email,
         is_workspace: record.is_workspace === true,
         status: record.status,
@@ -163,22 +173,24 @@ export function createTestSendStore(config: {
         "release_test_send",
       );
     },
-    async markReconnectNeeded(userId) {
+    async markReconnectNeeded(userId, connectionId) {
       await request(
         "rpc/mark_test_send_reconnect_needed",
         {},
         "POST",
         "mark_test_send_reconnect_needed",
-        { p_user_id: userId },
+        { p_user_id: userId, p_connection_id: connectionId },
       );
     },
   };
 }
 
 /**
- * The single place that decides which Gmail account a test goes out from.
- * Today a user has one connection, so this returns it. When a connection id is
- * given it must belong to the caller; anything else resolves to no sender.
+ * The single place that decides which Gmail account a test goes out from: the
+ * one chosen in the editor's From field, which the editor always sends and
+ * which must belong to the caller. Without an id, the caller's oldest connected
+ * account, the same one the editor preselects. Anything else resolves to no
+ * sender.
  */
 export async function resolveTestSender(
   userId: string,
@@ -235,16 +247,17 @@ async function releaseQuietly(
 }
 
 /**
- * The dashboard must stop showing the account as healthy and the sender must
+ * The dashboard must stop showing that account as healthy and the sender must
  * stop trying its schedules. If the write fails the user still gets the 409
  * telling them to reconnect; the sender's own invalid_grant path catches up.
  */
 async function markReconnectNeededQuietly(
   store: TestSendStore,
   userId: string,
+  connectionId: string,
 ): Promise<void> {
   try {
-    await store.markReconnectNeeded(userId);
+    await store.markReconnectNeeded(userId, connectionId);
   } catch {
     console.error("[ERROR] test_send_reconnect_mark_failed");
   }
@@ -313,7 +326,11 @@ export function createTestSendHandler(config: {
             error instanceof GoogleTokenError &&
             error.code === "invalid_grant"
           ) {
-            await markReconnectNeededQuietly(config.store, identity.user.id);
+            await markReconnectNeededQuietly(
+              config.store,
+              identity.user.id,
+              sender.id,
+            );
             return failure(
               409,
               "gmail_reconnect_required",
