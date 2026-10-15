@@ -1,4 +1,11 @@
 :root {
+  --rm-bg: #f3faf6;
+  --rm-grape: #6d3bef;
+  --rm-grape-dark: #5326d1;
+  --rm-ink: #1b1530;
+  --rm-ink-2: #3f3856;
+  --rm-muted: #6e6886;
+  --rm-radius-pill: 999px;
   --rm-font-display:
     var(--font-plus-jakarta-sans), "Plus Jakarta Sans", "DM Sans",
     var(--font-dm-sans), system-ui, sans-serif;
@@ -8,5 +15,8 @@
 }
 
 body {
+  margin: 0;
+  background: var(--rm-bg);
+  color: var(--rm-ink);
   font-family: var(--rm-font-body);
 }

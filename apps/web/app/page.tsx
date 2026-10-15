@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import BrandMark from "../components/BrandMark";
+import { SiteFooter } from "../components/SiteFooter";
+import { SiteHeader } from "../components/SiteHeader";
 
 const siteUrl = "https://recurmail.com";
 
@@ -228,56 +229,6 @@ footer p { color: var(--rm-muted); }
 @media (max-width: 620px) { body { font-size: 16px; } .wrap { width: min(100% - 40px, 1120px); } .nav { align-items: flex-start; flex-direction: column; gap: 14px; } .nav-links { justify-content: flex-start; gap: 10px 18px; } .steps, .cal-grid, .ways, .privacy, .guide-links { grid-template-columns: minmax(0, 1fr); } section { padding: 64px 0; } .hero { gap: 34px; padding: 34px 0 56px; } .hero-art { padding-right: 0; } .repeat { margin-inline: 12px; padding: 12px; } .compose-top, .field { padding-inline: 14px; } .compose-body { padding-inline: 14px; } .closing { margin-bottom: 64px; padding: 48px 24px; border-radius: 22px; } }
 `;
 
-function SiteHeader() {
-  return (
-    <header className="site-header wrap">
-      <nav className="nav" aria-label="Main navigation">
-        <a className="logo" href="/" aria-label="RecurMail home">
-          <BrandMark />
-          RecurMail
-        </a>
-        <ul className="nav-links">
-          <li>
-            <a href="#how-it-works">How it works</a>
-          </li>
-          <li>
-            <a href="#faq">FAQ</a>
-          </li>
-          <li>
-            <a className="nav-login" href="/dashboard">
-              Log in
-            </a>
-          </li>
-          <li>
-            <a className="nav-primary" href="/auth/signin">
-              Create free account
-            </a>
-          </li>
-        </ul>
-      </nav>
-    </header>
-  );
-}
-
-function SiteFooter() {
-  return (
-    <footer>
-      <div className="wrap footer-content">
-        <p>© 2026 RecurMail · Recurring email for Gmail</p>
-        <p>
-          Gmail is a trademark of Google LLC. RecurMail is not affiliated with
-          or endorsed by Google.
-        </p>
-        <nav aria-label="Legal">
-          <a href="/privacy">Privacy</a>
-          {" · "}
-          <a href="/terms">Terms</a>
-        </nav>
-      </div>
-    </footer>
-  );
-}
-
 export default function HomePage() {
   return (
     <>
@@ -285,7 +236,7 @@ export default function HomePage() {
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <SiteHeader />
+      <SiteHeader variant="home" />
       <main id="main">
         <div className="wrap">
           <div className="hero">
@@ -654,7 +605,7 @@ export default function HomePage() {
           {JSON.stringify(structuredData).replace(/</g, "\\u003c")}
         </script>
       </main>
-      <SiteFooter />
+      <SiteFooter variant="marketing" />
     </>
   );
 }
