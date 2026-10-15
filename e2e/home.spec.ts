@@ -226,12 +226,15 @@ test("Open Graph image route serves a PNG", async ({ request }) => {
   );
 });
 
-test("homepage cards are lists, not articles, so browsers don't treat it as a story", async ({
+test("homepage is not marked up as a story, so Safari does not offer Reader", async ({
   page,
 }) => {
   await page.goto("/");
-  // Safari offers (or auto-opens) Reader for article-like pages.
+  // Safari offers (or auto-opens) Reader for article-like pages. Its detector
+  // keys on <p> text, so homepage copy uses styled divs instead; the
+  // "Safari Reader" workflow runs Safari's own detection as the real check.
   await expect(page.locator("article")).toHaveCount(0);
+  await expect(page.locator("main p")).toHaveCount(0);
   await expect(page.locator("ul.cal-grid > li")).toHaveCount(6);
   await expect(page.locator("ul.ways > li")).toHaveCount(2);
   const markers = await page
