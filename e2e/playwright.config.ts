@@ -19,8 +19,13 @@ export default defineConfig({
   },
   projects: [
     {
+      name: "warm-up",
+      testMatch: "**/warm-up.setup.ts",
+    },
+    {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      dependencies: ["warm-up"],
     },
   ],
   webServer: [
