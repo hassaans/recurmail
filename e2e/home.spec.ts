@@ -52,15 +52,18 @@ test("homepage nav keeps sign-in calls to action visible on desktop and mobile",
     await page.goto("/");
 
     const nav = page.getByRole("navigation", { name: "Main navigation" });
-    const login = nav.getByRole("link", { name: "Log in", exact: true });
+    const desktop = width > 860;
     const signup = nav.getByRole("link", {
-      name: "Create free account",
+      name: desktop ? "Create free account" : "Sign up free",
       exact: true,
     });
-    await expect(login).toBeVisible();
-    await expect(login).toHaveAttribute("href", "/dashboard");
     await expect(signup).toBeVisible();
     await expect(signup).toHaveAttribute("href", "/auth/signin");
+    // On phones Log in is one tap away, in the menu.
+    if (!desktop) await nav.getByRole("button", { name: "Menu" }).click();
+    const login = nav.getByRole("link", { name: "Log in", exact: true });
+    await expect(login).toBeVisible();
+    await expect(login).toHaveAttribute("href", "/dashboard");
     await expect(page.getByText("Launching soon", { exact: true })).toHaveCount(
       0,
     );
@@ -72,11 +75,13 @@ test("homepage nav keeps sign-in calls to action visible on desktop and mobile",
   }
 });
 
-test("on phones the header keeps the logo and sign-up button on one row, with the links below", async ({
+const middle = (box: { y: number; height: number }) => box.y + box.height / 2;
+
+test("on phones and tablets the header is one row: logo, sign-up button, menu button", async ({
   page,
 }) => {
-  for (const path of ["/", "/guides/recurring-email-gmail", "/terms"]) {
-    for (const width of [430, 390, 375, 360]) {
+  for (const path of ["/", "/guides/recurring-email-gmail"]) {
+    for (const width of [768, 430, 390, 375, 360, 320]) {
       await page.setViewportSize({ width, height: 844 });
       await page.goto(path);
       await page.evaluate(() => document.fonts.ready);
@@ -84,33 +89,131 @@ test("on phones the header keeps the logo and sign-up button on one row, with th
       const nav = page.getByRole("navigation", { name: "Main navigation" });
       const logo = nav.getByRole("link", { name: "RecurMail home" });
       const signup = nav.getByRole("link", {
-        name: "Create free account",
+        name: "Sign up free",
         exact: true,
       });
-      const login = nav.getByRole("link", { name: "Log in", exact: true });
-      const logoBox = await logo.boundingBox();
-      const signupBox = await signup.boundingBox();
-      const loginBox = await login.boundingBox();
-      if (!logoBox || !signupBox || !loginBox)
-        throw new Error("header links must be rendered");
-
-      // Logo left, sign-up button right, sharing one row.
-      const middle = (box: { y: number; height: number }) =>
-        box.y + box.height / 2;
-      expect(Math.abs(middle(logoBox) - middle(signupBox))).toBeLessThan(4);
+      const menu = nav.getByRole("button", { name: "Menu" });
+      const boxes = await Promise.all(
+        [logo, signup, menu].map((item) => item.boundingBox()),
+      );
+      if (boxes.some((box) => !box)) throw new Error("header must render");
+      const [logoBox, signupBox, menuBox] = boxes as NonNullable<
+        (typeof boxes)[number]
+      >[];
+      for (const box of [signupBox, menuBox])
+        expect(Math.abs(middle(box) - middle(logoBox))).toBeLessThan(4);
       expect(signupBox.x).toBeGreaterThan(logoBox.x + logoBox.width);
-      // The text links sit below that row, with Log in under the button.
-      expect(loginBox.y).toBeGreaterThan(signupBox.y + signupBox.height);
-      expect(
-        Math.abs(loginBox.x + loginBox.width - (signupBox.x + signupBox.width)),
-      ).toBeLessThan(2);
+      expect(menuBox.x).toBeGreaterThan(signupBox.x + signupBox.width);
+      expect(menuBox.width).toBeGreaterThanOrEqual(44);
+      expect(menuBox.height).toBeGreaterThanOrEqual(44);
+      await expect(menu).toHaveAttribute("aria-expanded", "false");
+      // Section links and Log in wait in the closed menu.
+      for (const name of ["How it works", "FAQ", "Log in"])
+        await expect(nav.getByRole("link", { name, exact: true })).toBeHidden();
       await expect(signup).toHaveCSS("text-decoration-line", "none");
       await expect(signup).toHaveCSS("white-space", "nowrap");
-      // Keyboard focus follows the rows: from the logo straight to sign-up.
+      const header = await page.getByRole("banner").boundingBox();
+      expect(header?.height).toBeLessThan(100);
+      // Tab follows the row: logo, sign-up, menu.
       await logo.focus();
       await page.keyboard.press("Tab");
       await expect(signup).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(menu).toBeFocused();
 
+      const pageWidths = await page.evaluate(() => ({
+        document: document.documentElement.scrollWidth,
+        viewport: document.documentElement.clientWidth,
+      }));
+      expect(pageWidths.document).toBeLessThanOrEqual(pageWidths.viewport);
+    }
+  }
+});
+
+test("the phone menu opens, lists the links, and closes on Escape, outside taps and link taps", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/guides/recurring-email-gmail");
+  const nav = page.getByRole("navigation", { name: "Main navigation" });
+  const menu = nav.getByRole("button", { name: "Menu" });
+  const panel = page.locator(`#${await menu.getAttribute("aria-controls")}`);
+
+  await menu.click();
+  await expect(menu).toHaveAttribute("aria-expanded", "true");
+  await expect(panel).toBeVisible();
+  const links = panel.getByRole("link");
+  await expect(links).toHaveText([
+    "How it works",
+    "FAQ",
+    "Extension alternative",
+    "Log in",
+  ]);
+  const hrefs = await links.evaluateAll((items) =>
+    items.map((item) => item.getAttribute("href")),
+  );
+  expect(hrefs).toEqual([
+    "/#how-it-works",
+    "/#faq",
+    "/guides/gmail-recurring-email-extension-alternative",
+    "/dashboard",
+  ]);
+  for (const link of await links.all()) {
+    const box = await link.boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+  }
+  // The panel follows the button, so Tab moves into the open menu.
+  await menu.focus();
+  await page.keyboard.press("Tab");
+  await expect(links.first()).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+  await expect(menu).toBeFocused();
+
+  await menu.click();
+  await expect(panel).toBeVisible();
+  await page.getByRole("heading", { level: 1 }).click();
+  await expect(panel).toBeHidden();
+
+  await page.goto("/");
+  const homePanel = page.locator(
+    `#${await menu.getAttribute("aria-controls")}`,
+  );
+  await menu.click();
+  await homePanel.getByRole("link", { name: "FAQ", exact: true }).click();
+  await expect(homePanel).toBeHidden();
+  await expect(page).toHaveURL(/#faq$/);
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(menu).toBeHidden();
+});
+
+test("legal and missing pages keep Log in in the row, with no one-item menu", async ({
+  page,
+}) => {
+  for (const path of ["/terms", "/privacy", "/no-such-page"]) {
+    for (const width of [390, 360, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(path);
+      await page.evaluate(() => document.fonts.ready);
+      const nav = page.getByRole("navigation", { name: "Main navigation" });
+      await expect(nav.getByRole("button", { name: "Menu" })).toHaveCount(0);
+      const row = [
+        nav.getByRole("link", { name: "RecurMail home" }),
+        nav.getByRole("link", { name: "Log in", exact: true }),
+        nav.getByRole("link", { name: "Sign up free", exact: true }),
+      ];
+      const boxes = await Promise.all(row.map((item) => item.boundingBox()));
+      if (boxes.some((box) => !box)) throw new Error("header must render");
+      const [logoBox, loginBox, signupBox] = boxes as NonNullable<
+        (typeof boxes)[number]
+      >[];
+      for (const box of [loginBox, signupBox])
+        expect(Math.abs(middle(box) - middle(logoBox))).toBeLessThan(4);
+      expect(loginBox.x).toBeGreaterThan(logoBox.x + logoBox.width);
+      expect(signupBox.x).toBeGreaterThan(loginBox.x + loginBox.width);
       const pageWidths = await page.evaluate(() => ({
         document: document.documentElement.scrollWidth,
         viewport: document.documentElement.clientWidth,
@@ -144,6 +247,7 @@ test("on desktop the header is one row with the sign-up button last, at its orig
         signupBox.y + signupBox.height / 2 - (loginBox.y + loginBox.height / 2),
       ),
     ).toBeLessThan(4);
+    await expect(nav.getByRole("button", { name: "Menu" })).toBeHidden();
     await login.focus();
     await page.keyboard.press("Tab");
     await expect(signup).toBeFocused();
