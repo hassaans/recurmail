@@ -719,42 +719,53 @@ const server = createServer(async (req, res) => {
       target.scenario.connections.set(row.user_id, row);
       return reply(204);
     }
+    if (url.pathname === "/rest/v1/rpc/claim_test_send") {
+      // Mirrors public.claim_test_send from migration 0008: count the user's
+      // sends inside the window and insert one more, with nothing in between.
+      if (req.method !== "POST")
+        return reply(405, { error: "unsupported claim method" });
+      const args = JSON.parse(await body(req));
+      const owner = findUser((user) => user.id === args.p_user_id);
+      if (
+        !owner ||
+        !Number.isInteger(args.p_limit) ||
+        !Number.isInteger(args.p_window_seconds)
+      )
+        return reply(400, { error: "invalid claim arguments" });
+      const now = Date.now();
+      const floor = new Date(now - args.p_window_seconds * 1000).toISOString();
+      const inWindow = owner.scenario.testSends
+        .filter((row) => row.user_id === owner.user.id && row.sent_at >= floor)
+        .map((row) => row.sent_at)
+        .sort();
+      if (inWindow.length >= args.p_limit)
+        return reply(200, { allowed: false, oldest_sent_at: inWindow[0] });
+      const id = randomUUID();
+      owner.scenario.testSends.push({
+        id,
+        user_id: owner.user.id,
+        sent_at: new Date(now).toISOString(),
+      });
+      return reply(200, { allowed: true, id });
+    }
     if (url.pathname === "/rest/v1/test_sends") {
-      // Service-role only: the app never reads this table as the user.
-      if (req.method === "POST") {
-        const row = JSON.parse(await body(req));
-        const owner = findUser((user) => user.id === row.user_id);
-        if (!owner || typeof row.sent_at !== "string")
-          return reply(400, { error: "invalid test send row" });
-        owner.scenario.testSends.push({
-          id: randomUUID(),
-          user_id: row.user_id,
-          sent_at: row.sent_at,
-        });
-        return reply(201);
-      }
-      if (req.method === "GET") {
-        const owner = findUser(
-          (user) => `eq.${user.id}` === url.searchParams.get("user_id"),
-        );
-        const since = url.searchParams.get("sent_at");
-        if (
-          !owner ||
-          !since?.startsWith("gte.") ||
-          url.searchParams.get("select") !== "sent_at"
-        )
-          return reply(400, { error: "invalid test send filter" });
-        const floor = since.slice("gte.".length);
-        return reply(
-          200,
-          owner.scenario.testSends
-            .filter(
-              (row) => row.user_id === owner.user.id && row.sent_at >= floor,
-            )
-            .map((row) => ({ sent_at: row.sent_at })),
-        );
-      }
-      return reply(405, { error: "unsupported test send method" });
+      // Service-role only: the app never reads this table as the user. The
+      // only direct access is giving a reservation back after a failed send.
+      if (req.method !== "DELETE")
+        return reply(405, { error: "unsupported test send method" });
+      const owner = findUser(
+        (user) => `eq.${user.id}` === url.searchParams.get("user_id"),
+      );
+      const idFilter = url.searchParams.get("id");
+      if (!owner || !idFilter?.startsWith("eq."))
+        return reply(400, { error: "invalid test send filter" });
+      const id = idFilter.slice("eq.".length);
+      const rows = owner.scenario.testSends;
+      const index = rows.findIndex(
+        (row) => row.id === id && row.user_id === owner.user.id,
+      );
+      if (index !== -1) rows.splice(index, 1);
+      return reply(204);
     }
     const target = findUser(
       (user) => `eq.${user.id}` === url.searchParams.get("user_id"),

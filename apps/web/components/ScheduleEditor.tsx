@@ -28,6 +28,7 @@ import {
   WEEKDAYS,
   weekdaysFromRule,
 } from "../lib/schedule-editor";
+import { TEST_SEND_LIMIT } from "../lib/test-send-limit";
 import RecipientField, {
   emptyRecipients,
   invalidRecipientCount,
@@ -230,6 +231,21 @@ function DayChips({
       ))}
     </div>
   );
+}
+
+/**
+ * The rate-limit message with the retry time in the reader's own time zone.
+ * The server's message only says how long to wait; a time of day is only
+ * meaningful once the browser knows where the reader is.
+ */
+function rateLimitMessage(fallback: string, retryAt: unknown): string {
+  const at = typeof retryAt === "string" ? new Date(retryAt) : null;
+  if (!at || Number.isNaN(at.getTime())) return fallback;
+  const time = at.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `You've sent ${TEST_SEND_LIMIT} test emails in the last hour. Try again at ${time}.`;
 }
 
 export default function ScheduleEditor({
@@ -700,7 +716,10 @@ export default function ScheduleEditor({
         )
           setTestError({ text: message, reconnect: true });
         else if (code === "rate_limited")
-          setTestError({ text: message, reconnect: false });
+          setTestError({
+            text: rateLimitMessage(message, result?.error?.retry_at),
+            reconnect: false,
+          });
         else setToast({ tone: "error", text: message });
         return;
       }
