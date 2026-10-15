@@ -79,6 +79,7 @@
   margin-left: 4px;
   text-decoration: none;
   padding: 11px 16px;
+  font-size: 15px;
   border-radius: var(--rm-radius-pill);
   background: var(--rm-grape);
   color: #fff;
@@ -168,6 +169,8 @@
       "links links";
     align-items: center;
     gap: 14px 12px;
+    /* Tab follows the rows: logo, sign-up button, then the links. */
+    reading-flow: grid-rows;
   }
 
   .page :global(.logo) {
