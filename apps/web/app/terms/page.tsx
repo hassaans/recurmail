@@ -43,8 +43,10 @@ export default function TermsPage() {
       <p>
         RecurMail is run by Hassaan Saleem. For help with your account, email{" "}
         <a href="mailto:support@recurmail.com">support@recurmail.com</a>. For
-        privacy or legal questions, email{" "}
-        <a href="mailto:hassaan@recurmail.com">hassaan@recurmail.com</a>.
+        privacy questions, email{" "}
+        <a href="mailto:privacy@recurmail.com">privacy@recurmail.com</a>. For
+        legal questions, email{" "}
+        <a href="mailto:legal@recurmail.com">legal@recurmail.com</a>.
       </p>
     </LegalDocument>
   );
