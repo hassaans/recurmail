@@ -31,6 +31,12 @@
   text-decoration: none;
   color: #1b1530;
 }
+.logo svg {
+  width: 34px;
+  height: 34px;
+  flex: none;
+}
+
 .main {
   padding-block: 32px 64px;
 }

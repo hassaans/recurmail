@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import BrandMark from "../../components/BrandMark";
 import ScheduleList from "../../components/ScheduleList";
 import { configuredRuntime } from "../../lib/runtime";
 import styles from "./page.module.css";
@@ -44,7 +45,8 @@ export default async function Dashboard({
         Skip to content
       </a>
       <header className={styles.header}>
-        <a className={styles.logo} href="/">
+        <a className={styles.logo} href="/" aria-label="RecurMail home">
+          <BrandMark />
           RecurMail
         </a>
         {user ? <a href="/settings">Settings</a> : null}

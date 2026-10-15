@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import BrandMark from "../../../components/BrandMark";
 
 const siteUrl = "https://recurmail.com";
 const pageUrl = `${siteUrl}/guides/recurring-email-gmail`;
@@ -49,6 +50,9 @@ a { color: inherit; }
 .nav-links { display: flex; align-items: center; justify-content: flex-end; gap: 24px; flex-wrap: wrap; margin: 0; padding: 0; list-style: none; }
 .nav-links a { color: var(--rm-ink-2); font-size: 15px; font-weight: 500; text-decoration: none; }
 .nav-links a:hover, .text-link:hover { color: var(--rm-grape-dark); }
+.nav-links a.nav-primary { padding: 11px 16px; border-radius: 999px; background: var(--rm-grape); color: #fff; font-weight: 600; white-space: nowrap; }
+.nav-links a.nav-primary:hover { background: var(--rm-grape-dark); color: #fff; }
+.nav-links a.nav-login { white-space: nowrap; }
 .guide { min-height: calc(100vh - 180px); padding-top: 64px; padding-bottom: 88px; }
 .guide-header { max-width: 760px; margin-bottom: 38px; }
 .guide-header h1 { margin: 0; font: 800 clamp(38px, 5vw, 58px)/1.05 var(--rm-font-display); letter-spacing: -0.03em; }
@@ -68,29 +72,6 @@ footer { padding: 32px 0 48px; border-top: 1px solid var(--rm-line); color: var(
 footer p { margin: 0; color: var(--rm-muted); }
 @media (max-width: 620px) { .wrap { width: min(100% - 40px, 1120px); } .nav { align-items: flex-start; flex-direction: column; gap: 14px; } .nav-links { justify-content: flex-start; gap: 10px 18px; } .guide { padding-top: 44px; padding-bottom: 64px; } .guide-header p { font-size: 17px; } }
 `;
-
-function BrandMark() {
-  return (
-    <svg viewBox="0 0 64 64" aria-hidden="true">
-      <rect width="64" height="64" rx="16" fill="#6D3BEF" />
-      <path
-        d="M44 22a15 15 0 1 0 4 12"
-        fill="none"
-        stroke="#FFFFFF"
-        strokeWidth="6"
-        strokeLinecap="round"
-      />
-      <path
-        d="M38 14l8 8-9 5"
-        fill="none"
-        stroke="#FFFFFF"
-        strokeWidth="6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 export default function RecurringEmailGmailGuide() {
   return (
@@ -125,6 +106,16 @@ export default function RecurringEmailGmailGuide() {
             <li>
               <a href="/guides/gmail-recurring-email-extension-alternative">
                 Extension alternative
+              </a>
+            </li>
+            <li>
+              <a className="nav-login" href="/dashboard">
+                Log in
+              </a>
+            </li>
+            <li>
+              <a className="nav-primary" href="/auth/signin">
+                Create free account
               </a>
             </li>
           </ul>
