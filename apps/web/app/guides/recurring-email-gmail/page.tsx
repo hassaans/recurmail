@@ -35,7 +35,7 @@ export const metadata: Metadata = {
 };
 
 const guideStyles = `
-:root { --rm-bg: #F3FAF6; --rm-paper: #fff; --rm-line: #D5E8DD; --rm-ink: #1B1530; --rm-ink-2: #3F3856; --rm-muted: #6E6886; --rm-grape: #6D3BEF; --rm-grape-dark: #5326D1; --rm-font-display: "Plus Jakarta Sans", "DM Sans", system-ui, sans-serif; --rm-font-body: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; --rm-radius: 18px; --rm-radius-sm: 12px; }
+:root { --rm-bg: #F3FAF6; --rm-paper: #fff; --rm-line: #D5E8DD; --rm-ink: #1B1530; --rm-ink-2: #3F3856; --rm-muted: #6E6886; --rm-grape: #6D3BEF; --rm-grape-dark: #5326D1; --rm-radius: 18px; --rm-radius-sm: 12px; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--rm-bg); color: var(--rm-ink); font: 17px/1.6 var(--rm-font-body); -webkit-font-smoothing: antialiased; }
 a { color: inherit; }
@@ -76,16 +76,6 @@ footer p { margin: 0; color: var(--rm-muted); }
 export default function RecurringEmailGmailGuide() {
   return (
     <>
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link
-        rel="preconnect"
-        href="https://fonts.gstatic.com"
-        crossOrigin="anonymous"
-      />
-      <link
-        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap"
-        rel="stylesheet"
-      />
       <style>{guideStyles}</style>
       <a className="skip-link" href="#main">
         Skip to content

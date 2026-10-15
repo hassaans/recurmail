@@ -72,6 +72,52 @@ test("homepage nav keeps sign-in calls to action visible on desktop and mobile",
   }
 });
 
+test("dashboard logo uses the brand font and keeps space between mark and wordmark", async ({
+  page,
+}) => {
+  const externalFontRequests: string[] = [];
+  const localFontResponses: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).hostname === "fonts.googleapis.com") {
+      externalFontRequests.push(request.url());
+    }
+  });
+  page.on("response", (response) => {
+    if (
+      response.url().includes("/_next/static/media/") &&
+      response.url().endsWith(".woff2")
+    ) {
+      localFontResponses.push(response.url());
+    }
+  });
+
+  await page.goto("/dashboard");
+  const logo = page.getByRole("link", { name: "RecurMail home" });
+  await expect(logo).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+
+  const layout = await logo.evaluate((element) => {
+    const mark = element.querySelector("svg");
+    const wordmark = Array.from(element.childNodes).find(
+      (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+    );
+    if (!mark || !wordmark) throw new Error("Dashboard logo parts are missing");
+    const markBox = mark.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(wordmark);
+    const wordmarkBox = range.getBoundingClientRect();
+    return {
+      fontFamily: getComputedStyle(element).fontFamily,
+      gap: wordmarkBox.left - markBox.right,
+    };
+  });
+
+  expect(layout.fontFamily).toContain("Plus Jakarta Sans");
+  expect(layout.gap).toBeGreaterThanOrEqual(8);
+  expect(externalFontRequests).toEqual([]);
+  expect(localFontResponses.length).toBeGreaterThanOrEqual(2);
+});
+
 test("crawler routes list the homepage and both guides", async ({
   request,
 }) => {

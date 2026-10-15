@@ -9,10 +9,7 @@
   min-height: 100vh;
   background: var(--rm-bg);
   color: var(--rm-ink);
-  font:
-    17px / 1.7 "DM Sans",
-    system-ui,
-    sans-serif;
+  font: 17px / 1.7 var(--rm-font-body);
 }
 .page a {
   color: var(--rm-grape-dark);
@@ -39,7 +36,7 @@
 }
 .main h1,
 .main h2 {
-  font-family: "Plus Jakarta Sans", "DM Sans", sans-serif;
+  font-family: var(--rm-font-display);
   line-height: 1.15;
 }
 .main h1 {

@@ -101,8 +101,6 @@ const globalStyles = `
   --rm-teal: #0E9F87; --rm-teal-dark: #0B7564; --rm-teal-soft: #D3F2EA; --rm-sun: #FFD84D;
   --rm-sun-soft: #FFF3BF; --rm-sky-soft: #E3EBFF; --rm-warn-bg: #FFF4E5;
   --rm-warn-line: #F6D7A8; --rm-warn-ink: #6B4A12; --rm-danger: #E5484D;
-  --rm-font-display: "Plus Jakarta Sans", "DM Sans", system-ui, sans-serif;
-  --rm-font-body: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --rm-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --rm-radius: 18px; --rm-radius-sm: 12px; --rm-radius-pill: 999px;
   --rm-shadow: 0 1px 0 rgb(27 21 48 / 4%), 0 10px 30px -12px rgb(27 21 48 / 18%);
@@ -283,16 +281,6 @@ function SiteFooter() {
 export default function HomePage() {
   return (
     <>
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link
-        rel="preconnect"
-        href="https://fonts.gstatic.com"
-        crossOrigin="anonymous"
-      />
-      <link
-        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap"
-        rel="stylesheet"
-      />
       <style>{globalStyles}</style>
       <a className="skip-link" href="#main">
         Skip to content
