@@ -21,7 +21,7 @@ interface GmailMessage {
 }
 interface ScenarioState {
   connections: Array<{ user_id: string; status: string }>;
-  schedules: Array<{ id: string; user_id: string }>;
+  schedules: Array<{ id: string; user_id: string; status: string }>;
   sendLogs: unknown[];
   gmailMessages: GmailMessage[];
   testSends: Array<{ user_id: string; sent_at: string }>;
@@ -231,6 +231,11 @@ test("asks the user to reconnect when Gmail access has expired", async ({
 }, testInfo) => {
   await prepare(request, scenario.id, "expired-grant");
   await signIn(page, context, scenario.connected);
+  const before = await readState(request, scenario.id);
+  const ownedBefore = before.schedules.filter(
+    (schedule) => schedule.user_id === scenario.connected.id,
+  );
+  expect(ownedBefore.map((schedule) => schedule.status)).toEqual(["active"]);
   await startDraft(page);
   await testButton(page).click();
   const alert = page.getByRole("alert").filter({
@@ -248,14 +253,61 @@ test("asks the user to reconnect when Gmail access has expired", async ({
   await testButton(page).scrollIntoViewIfNeeded();
   await page.screenshot({ path: shot(testInfo, "error-state-375") });
 
-  // Nothing was sent, counted, or changed on the connection.
+  // Nothing was sent or counted. The dead token is recorded the way the
+  // sender records it: the connection needs reconnecting and the user's
+  // schedules are paused, with no send history and no reconnect email.
   const after = await readState(request, scenario.id);
   expect(after.gmailMessages).toEqual([]);
   expect(after.testSends).toEqual([]);
+  expect(after.sendLogs).toEqual([]);
   const connection = after.connections.find(
     (row) => row.user_id === scenario.connected.id,
   );
-  expect(connection?.status).toBe("connected");
+  expect(connection?.status).toBe("needs_reconnect");
+  const ownedAfter = after.schedules.filter(
+    (schedule) => schedule.user_id === scenario.connected.id,
+  );
+  expect(ownedAfter.map((schedule) => schedule.id)).toEqual(
+    ownedBefore.map((schedule) => schedule.id),
+  );
+  expect(ownedAfter.map((schedule) => schedule.status)).toEqual(["paused"]);
+  // Other users' connections and schedules are untouched.
+  for (const row of after.connections)
+    if (row.user_id !== scenario.connected.id)
+      expect(row.status).toBe(
+        before.connections.find((c) => c.user_id === row.user_id)?.status,
+      );
+  expect(
+    after.schedules.filter((s) => s.user_id !== scenario.connected.id),
+  ).toEqual(
+    before.schedules.filter((s) => s.user_id !== scenario.connected.id),
+  );
+
+  // Following the link: the dashboard shows the reconnect banner and action,
+  // and the schedule is listed as paused until Gmail is reconnected.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  // The draft is unsaved, so the editor asks before leaving; the user confirms.
+  page.once("dialog", (dialog) => dialog.accept());
+  await reconnect.click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  const banner = page
+    .getByRole("region", { name: "Gmail account" })
+    .getByRole("alert");
+  await expect(banner).toContainText("Gmail needs reconnecting");
+  await expect(
+    banner.getByRole("button", { name: "Reconnect Gmail", exact: true }),
+  ).toBeVisible();
+  // The schedule itself is paused now (the same state the sender leaves it in
+  // when it hits the dead token), so the row shows the paused state with a
+  // Resume action rather than the connection-only "Needs reconnect" label.
+  const row = page
+    .getByRole("listitem")
+    .filter({ hasText: "Fixture reminder" });
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText("Status Paused");
+  await expect(row).toContainText("Paused. Won't send until you resume.");
+  await expect(row.getByRole("button", { name: "Resume" })).toBeVisible();
+  await page.screenshot({ path: shot(testInfo, "dashboard-reconnect-1280") });
 });
 
 test("shows an error toast when Gmail rejects the send", async ({

@@ -411,7 +411,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "No connected Gmail account (gmail_not_connected), or Gmail access has expired and must be reconnected from the dashboard (gmail_reconnect_required).",
+            "description": "No connected Gmail account (gmail_not_connected), or Gmail access has expired and must be reconnected from the dashboard (gmail_reconnect_required). On gmail_reconnect_required the connection is marked needs_reconnect and the owner's active schedules are paused, the same as when the sender hits the dead token; no send history is written and no reconnect email is queued.",
             "content": {
               "application/json": {
                 "schema": {

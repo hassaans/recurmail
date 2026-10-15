@@ -67,7 +67,11 @@ interface FakeRow {
   sentAt: string;
 }
 
-type FakeStore = TestSendStore & { rows: Map<string, FakeRow> };
+type FakeStore = TestSendStore & {
+  rows: Map<string, FakeRow>;
+  /** The connection's status after the handler ran: still connected, or needs_reconnect. */
+  connectionStatus(): string | undefined;
+};
 
 /**
  * A fake store with the same rules as the real PostgREST queries and the
@@ -84,6 +88,7 @@ function fakeStore(
     options.connection === undefined ? sender() : options.connection;
   return {
     rows,
+    connectionStatus: () => connection?.status,
     findConnection: vi.fn(async (userId: string, id?: string) => {
       if (userId !== owner.id) return null;
       if (id !== undefined && id !== connectionId) return null;
@@ -103,6 +108,10 @@ function fakeStore(
     }),
     release: vi.fn(async (userId: string, id: string) => {
       if (rows.get(id)?.userId === userId) rows.delete(id);
+    }),
+    markReconnectNeeded: vi.fn(async (userId: string) => {
+      if (userId === owner.id && connection?.status === "connected")
+        connection.status = "needs_reconnect";
     }),
   };
 }
@@ -185,6 +194,7 @@ describe("POST /api/schedules/test", () => {
     ]);
     expect(store.claim).toHaveBeenCalledWith(owner.id);
     expect(store.release).not.toHaveBeenCalled();
+    expect(store.markReconnectNeeded).not.toHaveBeenCalled();
     expect([...store.rows.values()]).toEqual([
       { userId: owner.id, sentAt: new Date(instant).toISOString() },
     ]);
@@ -411,6 +421,37 @@ describe("POST /api/schedules/test", () => {
     expect(store.release).toHaveBeenCalledTimes(1);
     expect(store.release).toHaveBeenCalledWith(owner.id, expect.any(String));
     expect(store.rows.size).toBe(0);
+    // The dead token is recorded: the connection no longer looks healthy.
+    expect(store.markReconnectNeeded).toHaveBeenCalledTimes(1);
+    expect(store.markReconnectNeeded).toHaveBeenCalledWith(owner.id);
+    expect(store.connectionStatus()).toBe("needs_reconnect");
+  });
+
+  it("still answers 409 and logs code-only when marking the reconnect fails", async () => {
+    const store: TestSendStore = {
+      ...fakeStore(),
+      markReconnectNeeded: vi.fn(async () => {
+        throw new Error("fake-secret-connection-string");
+      }),
+    };
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const google = fakeGoogle({
+        refresh: new GoogleTokenError("invalid_grant"),
+      });
+      const response = await handler(store, google)(request(draft()));
+      expect(response.status).toBe(409);
+      expect((await response.json()).error.code).toBe(
+        "gmail_reconnect_required",
+      );
+      expect(store.markReconnectNeeded).toHaveBeenCalledWith(owner.id);
+      expect(store.release).toHaveBeenCalledTimes(1);
+      expect(error.mock.calls).toEqual([
+        ["[ERROR] test_send_reconnect_mark_failed"],
+      ]);
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it("answers 502 when Gmail fails and gives the reservation back", async () => {
@@ -428,6 +469,7 @@ describe("POST /api/schedules/test", () => {
       });
       expect(store.release).toHaveBeenCalledTimes(1);
       expect(store.rows.size).toBe(0);
+      expect(store.markReconnectNeeded).not.toHaveBeenCalled();
       expect(error).toHaveBeenCalledWith("[ERROR] test_send_gmail_failed");
     } finally {
       error.mockRestore();
@@ -608,6 +650,8 @@ describe("test send store", () => {
         return Response.json({ allowed: true, id: reservation });
       if (url.pathname === "/rest/v1/test_sends" && init.method === "DELETE")
         return new Response(null, { status: 204 });
+      if (url.pathname === "/rest/v1/rpc/mark_test_send_reconnect_needed")
+        return new Response(null, { status: 204 });
       throw new Error(`unexpected ${init.method} ${input}`);
     });
     const store = storeWith(fetcher);
@@ -624,6 +668,7 @@ describe("test send store", () => {
       id: reservation,
     });
     await store.release(owner.id, reservation);
+    await store.markReconnectNeeded(owner.id);
     const calls = fetcher.mock.calls.map(([input, init]) => ({
       url: new URL(input),
       init,
@@ -634,6 +679,7 @@ describe("test send store", () => {
       "GET /rest/v1/gmail_connections",
       "POST /rest/v1/rpc/claim_test_send",
       "DELETE /rest/v1/test_sends",
+      "POST /rest/v1/rpc/mark_test_send_reconnect_needed",
     ]);
     expect(calls[0].url.searchParams.get("user_id")).toBe(`eq.${owner.id}`);
     expect(calls[0].url.searchParams.get("id")).toBe(`eq.${connectionId}`);
@@ -655,6 +701,8 @@ describe("test send store", () => {
     expect((calls[2].init.headers as Record<string, string>).Prefer).toBe(
       "return=minimal",
     );
+    expect(calls[3].url.search).toBe("");
+    expect(calls[3].init.body).toBe(JSON.stringify({ p_user_id: owner.id }));
     for (const { init } of calls) {
       const headers = init.headers as Record<string, string>;
       expect(headers.apikey).toBe("fake-secret-key");
@@ -708,6 +756,9 @@ describe("test send store", () => {
     );
     await expect(store.findConnection(owner.id)).rejects.toThrow(
       "Test send storage failed: read_connection",
+    );
+    await expect(store.markReconnectNeeded(owner.id)).rejects.toThrow(
+      "Test send storage failed: mark_test_send_reconnect_needed",
     );
   });
 });

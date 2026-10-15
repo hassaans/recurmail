@@ -50,6 +50,12 @@ export interface TestSendStore {
   claim(userId: string): Promise<TestSendClaim>;
   /** Give a reservation back because the email did not go out. */
   release(userId: string, id: string): Promise<void>;
+  /**
+   * The refresh token is dead: mark the connection needs_reconnect and pause
+   * the user's active schedules, in one transaction. No send_log row and no
+   * reconnect email; the user is already reading the message.
+   */
+  markReconnectNeeded(userId: string): Promise<void>;
 }
 
 export class TestSendStorageError extends Error {
@@ -157,6 +163,15 @@ export function createTestSendStore(config: {
         "release_test_send",
       );
     },
+    async markReconnectNeeded(userId) {
+      await request(
+        "rpc/mark_test_send_reconnect_needed",
+        {},
+        "POST",
+        "mark_test_send_reconnect_needed",
+        { p_user_id: userId },
+      );
+    },
   };
 }
 
@@ -216,6 +231,22 @@ async function releaseQuietly(
     await store.release(userId, id);
   } catch {
     console.error("[ERROR] test_send_release_failed");
+  }
+}
+
+/**
+ * The dashboard must stop showing the account as healthy and the sender must
+ * stop trying its schedules. If the write fails the user still gets the 409
+ * telling them to reconnect; the sender's own invalid_grant path catches up.
+ */
+async function markReconnectNeededQuietly(
+  store: TestSendStore,
+  userId: string,
+): Promise<void> {
+  try {
+    await store.markReconnectNeeded(userId);
+  } catch {
+    console.error("[ERROR] test_send_reconnect_mark_failed");
   }
 }
 
@@ -281,12 +312,14 @@ export function createTestSendHandler(config: {
           if (
             error instanceof GoogleTokenError &&
             error.code === "invalid_grant"
-          )
+          ) {
+            await markReconnectNeededQuietly(config.store, identity.user.id);
             return failure(
               409,
               "gmail_reconnect_required",
               `Gmail access for ${sender.email} has expired. Reconnect it from the dashboard.`,
             );
+          }
           throw error;
         }
         const raw = buildMime({
