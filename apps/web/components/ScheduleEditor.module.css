@@ -1,6 +1,5 @@
 .page {
   min-height: 100vh;
-  margin: -8px;
   background: #f3faf6;
   color: #1b1530;
   font: 17px / 1.6 var(--rm-font-body);

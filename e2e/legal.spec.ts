@@ -26,6 +26,60 @@ test("privacy policy describes Gmail data, deletion and service providers", asyn
   ).toHaveAttribute("href", "/terms");
 });
 
+test("legal pages use the shared brand header and edge-to-edge page background", async ({
+  page,
+}) => {
+  for (const path of ["/privacy", "/terms"]) {
+    for (const width of [1280, 375]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(path);
+      await page.evaluate(() => document.fonts.ready);
+
+      const logo = page.getByRole("link", { name: "RecurMail home" });
+      await expect(logo).toBeVisible();
+      await expect(
+        page.getByRole("link", { name: "Open RecurMail" }),
+      ).toHaveCount(0);
+      await expect(page.locator("main .eyebrow")).toHaveCount(0);
+      const fontFamily = await logo.evaluate(
+        (element) => getComputedStyle(element).fontFamily,
+      );
+      expect(fontFamily).toContain("Plus Jakarta Sans");
+
+      const bodyLayout = await page.evaluate(() => ({
+        left: document.body.getBoundingClientRect().left,
+        margin: getComputedStyle(document.body).margin,
+      }));
+      expect(bodyLayout.left).toBe(0);
+      expect(bodyLayout.margin).toBe("0px");
+
+      const nav = page.getByRole("navigation", { name: "Main navigation" });
+      const login = nav.getByRole("link", { name: "Log in", exact: true });
+      const signup = nav.getByRole("link", {
+        name: "Create free account",
+        exact: true,
+      });
+      await expect(login).toBeVisible();
+      await expect(login).toHaveAttribute("href", "/dashboard");
+      await expect(signup).toBeVisible();
+      await expect(signup).toHaveAttribute("href", "/auth/signin");
+      await expect(
+        page
+          .getByRole("contentinfo")
+          .getByText(
+            "Gmail is a trademark of Google LLC. RecurMail is not affiliated with Google.",
+          ),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("contentinfo").getByRole("link", { name: "Privacy" }),
+      ).toHaveAttribute("href", "/privacy");
+      await expect(
+        page.getByRole("contentinfo").getByRole("link", { name: "Terms" }),
+      ).toHaveAttribute("href", "/terms");
+    }
+  }
+});
+
 test("legal pages are linked from the homepage, guides and app footer", async ({
   page,
 }) => {

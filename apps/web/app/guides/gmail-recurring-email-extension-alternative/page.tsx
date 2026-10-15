@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import BrandMark from "../../../components/BrandMark";
+import { SiteFooter } from "../../../components/SiteFooter";
+import { SiteHeader } from "../../../components/SiteHeader";
 
 const siteUrl = "https://recurmail.com";
 const pageUrl = `${siteUrl}/guides/gmail-recurring-email-extension-alternative`;
@@ -80,35 +81,7 @@ export default function GmailExtensionAlternativeGuide() {
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <header className="site-header wrap">
-        <nav className="nav" aria-label="Main navigation">
-          <a className="logo" href="/" aria-label="RecurMail home">
-            <BrandMark />
-            RecurMail
-          </a>
-          <ul className="nav-links">
-            <li>
-              <a href="/#how-it-works">How it works</a>
-            </li>
-            <li>
-              <a href="/#faq">FAQ</a>
-            </li>
-            <li>
-              <a href="/guides/recurring-email-gmail">Gmail guide</a>
-            </li>
-            <li>
-              <a className="nav-login" href="/dashboard">
-                Log in
-              </a>
-            </li>
-            <li>
-              <a className="nav-primary" href="/auth/signin">
-                Create free account
-              </a>
-            </li>
-          </ul>
-        </nav>
-      </header>
+      <SiteHeader variant="guide" relatedGuide="extension" />
       <main id="main" className="guide wrap">
         <article>
           <header className="guide-header">
@@ -185,20 +158,7 @@ export default function GmailExtensionAlternativeGuide() {
           </div>
         </article>
       </main>
-      <footer>
-        <div className="wrap footer-content">
-          <p>© 2026 RecurMail · Recurring email for Gmail</p>
-          <p>
-            Gmail is a trademark of Google LLC. RecurMail is not affiliated with
-            or endorsed by Google.
-          </p>
-          <nav aria-label="Legal">
-            <a href="/privacy">Privacy</a>
-            {" · "}
-            <a href="/terms">Terms</a>
-          </nav>
-        </div>
-      </footer>
+      <SiteFooter variant="marketing" />
     </>
   );
 }
