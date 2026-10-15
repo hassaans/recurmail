@@ -89,6 +89,19 @@
   font-weight: 600;
   font-size: 16px;
 }
+/* Shown instead of the next-send time when the schedule will not send:
+   paused by the user, or waiting on a Gmail connection. */
+.note {
+  margin: 0 0 16px;
+  padding: 12px 0 0;
+  border-top: 1px dashed var(--rm-line);
+  color: var(--rm-ink-2);
+  font-size: 15px;
+  font-weight: 600;
+}
+.noteWarn {
+  color: var(--rm-warn-ink);
+}
 .actions {
   display: flex;
   flex-wrap: wrap;

@@ -1,3 +1,4 @@
+import { type ConnectionStatus, scheduleState } from "../lib/schedule-state";
 import { recipientSummary } from "../lib/schedule-summary";
 import {
   describeCadence,
@@ -8,20 +9,19 @@ import {
 import type { ScheduleRow, SendHistoryRow } from "../lib/schedules";
 import controls from "./controls.module.css";
 import styles from "./ScheduleHistory.module.css";
+import SchedulePauseButton from "./SchedulePauseButton";
 
 type ScheduleHistoryProps = {
   schedule: ScheduleRow;
   history: SendHistoryRow[];
-  canEdit: boolean;
+  connectionStatus: ConnectionStatus;
 };
 
-function scheduleStatus(status: ScheduleRow["status"]) {
-  if (status === "sending")
-    return { label: "Sending", className: controls.pillTeal };
-  if (status === "paused")
-    return { label: "Paused", className: controls.pillMuted };
-  return { label: "Active", className: controls.pillTeal };
-}
+const pillClass = {
+  teal: controls.pillTeal,
+  muted: controls.pillMuted,
+  warn: controls.pillWarn,
+} as const;
 
 function entryStatus(status: SendHistoryRow["status"]) {
   if (status === "sent") return { label: "Sent", className: controls.pillTeal };
@@ -53,12 +53,16 @@ export function reasonFor(entry: SendHistoryRow): string | null {
 export default function ScheduleHistory({
   schedule,
   history,
-  canEdit,
+  connectionStatus,
 }: ScheduleHistoryProps) {
-  const status = scheduleStatus(schedule.status);
-  const recipients =
-    schedule.to.length + schedule.cc.length + schedule.bcc.length;
+  const state = scheduleState(schedule.status, connectionStatus);
+  const recipients = recipientSummary([
+    ...schedule.to,
+    ...schedule.cc,
+    ...schedule.bcc,
+  ]);
   const zone = zoneLabel(schedule.timezone, schedule.next_send_at);
+  const canEdit = connectionStatus === "connected";
   return (
     <>
       <a className={styles.back} href="/dashboard">
@@ -67,22 +71,30 @@ export default function ScheduleHistory({
       <header className={styles.header}>
         <div className={styles.titleRow}>
           <div>
-            <p className={styles.eyebrow}>Schedule</p>
+            <p className={controls.eyebrow}>Schedule</p>
             <div className={styles.title}>
               <h1>{schedule.subject}</h1>
-              <span className={`${controls.pill} ${status.className}`}>
-                {status.label}
+              <span className={controls.srOnly}>Status </span>
+              <span className={`${controls.pill} ${pillClass[state.tone]}`}>
+                {state.label}
               </span>
             </div>
           </div>
-          {canEdit ? (
-            <a
-              className={controls.secondary}
-              href={`/schedules/${encodeURIComponent(schedule.id)}/edit`}
-            >
-              Edit schedule
-            </a>
-          ) : null}
+          <div className={styles.headerActions}>
+            {canEdit ? (
+              <a
+                className={controls.secondary}
+                href={`/schedules/${encodeURIComponent(schedule.id)}/edit`}
+              >
+                Edit schedule
+              </a>
+            ) : null}
+            <SchedulePauseButton
+              scheduleId={schedule.id}
+              subject={schedule.subject}
+              status={schedule.status}
+            />
+          </div>
         </div>
         <dl className={styles.facts}>
           <div>
@@ -96,17 +108,26 @@ export default function ScheduleHistory({
               {zone}
             </dd>
           </div>
-          <div>
-            <dt>Next send</dt>
-            <dd>
-              <time dateTime={schedule.next_send_at}>
-                {formatScheduleTime(schedule.next_send_at, schedule.timezone)}
-              </time>
-            </dd>
-          </div>
+          {state.note ? (
+            <div>
+              <dt>Status</dt>
+              <dd className={state.tone === "warn" ? styles.noteWarn : ""}>
+                {state.note}
+              </dd>
+            </div>
+          ) : (
+            <div>
+              <dt>Next send</dt>
+              <dd>
+                <time dateTime={schedule.next_send_at}>
+                  {formatScheduleTime(schedule.next_send_at, schedule.timezone)}
+                </time>
+              </dd>
+            </div>
+          )}
           <div>
             <dt>Recipients</dt>
-            <dd>{recipientSummary(recipients)}</dd>
+            <dd>{recipients}</dd>
           </div>
         </dl>
       </header>

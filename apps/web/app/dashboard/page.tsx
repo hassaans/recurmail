@@ -41,6 +41,7 @@ const disconnectDialog = {
   description:
     "RecurMail will give up its permission to send from this Gmail account and pause every schedule. You can connect again at any time.",
   confirmLabel: "Disconnect Gmail",
+  pendingLabel: "Disconnecting…",
   action: "/api/gmail/disconnect",
 } as const;
 
@@ -96,40 +97,26 @@ export default async function Dashboard({
 
   return (
     <AppShell email={user?.email} active="schedules">
+      {/* Until Gmail is connected the Connect or Reconnect card is the only
+          call to action, so the New schedule button is not rendered. */}
       {user ? (
         <header className={styles.pageHeader}>
           <div>
-            <p className={styles.eyebrow}>Send from your own Gmail</p>
+            <p className={controls.eyebrow}>Send from your own Gmail</p>
             <h1>Your schedules</h1>
           </div>
-          <div className={styles.headerActions}>
-            {connected ? (
+          {connected ? (
+            <div className={styles.headerActions}>
               <a className={controls.primary} href="/schedules/new">
                 New schedule
               </a>
-            ) : (
-              <>
-                <button
-                  className={controls.primary}
-                  type="button"
-                  disabled
-                  aria-describedby="new-schedule-hint"
-                >
-                  New schedule
-                </button>
-                <p id="new-schedule-hint" className={styles.hint}>
-                  {connectionStatus === "needs_reconnect"
-                    ? "Reconnect Gmail to create new schedules."
-                    : "Connect Gmail first. Schedules send from your own Gmail account."}
-                </p>
-              </>
-            )}
-          </div>
+            </div>
+          ) : null}
         </header>
       ) : (
         <header className={styles.pageHeader}>
           <div>
-            <p className={styles.eyebrow}>Send from your own Gmail</p>
+            <p className={controls.eyebrow}>Send from your own Gmail</p>
             <h1>Sign in to RecurMail</h1>
           </div>
         </header>

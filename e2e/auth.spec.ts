@@ -145,9 +145,9 @@ test("Connect Gmail uses the signed-in email and permission denial explains the 
   callback.searchParams.set("state", consent.searchParams.get("state") ?? "");
   callback.searchParams.set("error", "access_denied");
   await page.goto(callback.toString());
-  await expect(page.getByRole("status")).toContainText(
-    "RecurMail needs permission to send your scheduled emails",
-  );
+  await expect(
+    page.getByRole("status").filter({ hasText: "RecurMail needs permission" }),
+  ).toContainText("RecurMail needs permission to send your scheduled emails");
   await expect(
     page.getByRole("button", { name: "Try connecting Gmail again" }),
   ).toBeVisible();
@@ -327,9 +327,9 @@ test("signed-in Connect Gmail exchanges PKCE, encrypts the row, then Disconnect 
     .getByRole("button", { name: "Disconnect Gmail", exact: true })
     .click();
   await expect(page).toHaveURL(/\/dashboard\?gmail=disconnected$/);
-  await expect(page.getByRole("status")).toContainText(
-    "All your schedules are paused",
-  );
+  await expect(
+    page.getByRole("status").filter({ hasText: "Gmail is disconnected" }),
+  ).toContainText("All your schedules are paused");
   await expect(
     page.getByRole("button", { name: "Connect Gmail", exact: true }),
   ).toBeVisible();

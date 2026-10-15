@@ -27,7 +27,7 @@ export default async function SettingsPage({
   return (
     <AppShell email={state.user.email} active="settings">
       <header className={styles.pageHeader}>
-        <p className={styles.eyebrow}>Account</p>
+        <p className={controls.eyebrow}>Account</p>
         <h1>Settings</h1>
       </header>
       <div className={styles.stack}>

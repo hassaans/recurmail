@@ -6,14 +6,6 @@
   font: 800 clamp(30px, 4.5vw, 40px) / 1.1 var(--rm-font-display);
   letter-spacing: -0.03em;
 }
-.eyebrow {
-  margin: 0 0 6px;
-  color: var(--rm-grape-dark);
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
 .stack {
   display: grid;
   gap: 20px;

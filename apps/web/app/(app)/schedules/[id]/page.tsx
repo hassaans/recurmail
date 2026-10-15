@@ -26,6 +26,11 @@ export default async function ScheduleHistoryPage({
       )
     : { kind: "signed_out" as const };
   if (!runtime || state.kind !== "signed_in") redirect("/dashboard");
+  const connectionStatus =
+    state.connection?.status === "connected" ||
+    state.connection?.status === "needs_reconnect"
+      ? state.connection.status
+      : "disconnected";
 
   const apiRequest = (path: string) =>
     new Request(`http://schedules.internal${path}`, {
@@ -61,7 +66,7 @@ export default async function ScheduleHistoryPage({
         <ScheduleHistory
           schedule={schedule}
           history={history}
-          canEdit={state.connection?.status === "connected"}
+          connectionStatus={connectionStatus}
         />
       ) : (
         <p className={controls.error} role="alert">

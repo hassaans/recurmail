@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import ConfirmForm from "../components/ConfirmForm";
 import ScheduleEditor from "../components/ScheduleEditor";
 import ScheduleList from "../components/ScheduleList";
+import SchedulePauseButton from "../components/SchedulePauseButton";
 
 type HasFunction<T> = T extends (...args: never[]) => unknown
   ? true
@@ -33,6 +34,11 @@ type ScheduleListPropsAreDataOnly = Assert<
 >;
 type ConfirmFormPropsAreDataOnly = Assert<
   HasFunction<ComponentProps<typeof ConfirmForm>> extends false ? true : false
+>;
+type SchedulePauseButtonPropsAreDataOnly = Assert<
+  HasFunction<ComponentProps<typeof SchedulePauseButton>> extends false
+    ? true
+    : false
 >;
 
 vi.stubGlobal("React", React);
@@ -64,7 +70,7 @@ const listProps: ComponentProps<typeof ScheduleList> = {
     {
       id: "c4a7b913-3d35-4c0d-8e7c-4c5d101f3f88",
       subject: "Weekly check-in",
-      recipients: 2,
+      recipients: "one@example.test and two@example.test",
       rrule: "FREQ=WEEKLY;BYDAY=MO;BYHOUR=9;BYMINUTE=15;BYSECOND=0",
       timezone: "Asia/Karachi",
       status: "active",
@@ -80,8 +86,14 @@ const confirmFormProps: ComponentProps<typeof ConfirmForm> = {
   title: "Disconnect Gmail?",
   description: "Every schedule will pause.",
   confirmLabel: "Disconnect Gmail",
+  pendingLabel: "Disconnecting…",
   action: "/api/gmail/disconnect",
   tone: "danger",
+};
+const pauseButtonProps: ComponentProps<typeof SchedulePauseButton> = {
+  scheduleId: "c4a7b913-3d35-4c0d-8e7c-4c5d101f3f88",
+  subject: "Weekly check-in",
+  status: "paused",
 };
 
 function readSource(relativePath: string): string {
@@ -189,10 +201,12 @@ describe("server/client prop boundaries", () => {
     const editorPropsAreDataOnly: ScheduleEditorPropsAreDataOnly = true;
     const listPropsAreDataOnly: ScheduleListPropsAreDataOnly = true;
     const confirmFormPropsAreDataOnly: ConfirmFormPropsAreDataOnly = true;
+    const pauseButtonPropsAreDataOnly: SchedulePauseButtonPropsAreDataOnly = true;
 
     expect(editorPropsAreDataOnly).toBe(true);
     expect(listPropsAreDataOnly).toBe(true);
     expect(confirmFormPropsAreDataOnly).toBe(true);
+    expect(pauseButtonPropsAreDataOnly).toBe(true);
   });
 
   it("round-trips representative client component props through JSON", () => {
@@ -204,6 +218,9 @@ describe("server/client prop boundaries", () => {
     expect(JSON.parse(JSON.stringify(listProps))).toEqual(listProps);
     expect(JSON.parse(JSON.stringify(confirmFormProps))).toEqual(
       confirmFormProps,
+    );
+    expect(JSON.parse(JSON.stringify(pauseButtonProps))).toEqual(
+      pauseButtonProps,
     );
   });
 
@@ -217,6 +234,25 @@ describe("server/client prop boundaries", () => {
     expect(list).toContain("Weekly check-in");
     expect(list).toContain("Every week on Monday at 9:15 AM");
     expect(list).toContain("Mon, Oct 19 at 9:15 AM PKT");
+    expect(list).toContain("one@example.test and two@example.test");
+    const pausedList = renderToString(
+      createElement(ScheduleList, {
+        ...listProps,
+        initialSchedules: [
+          { ...listProps.initialSchedules[0], status: "paused" },
+        ],
+      }),
+    );
+    expect(pausedList).toContain("Paused. Won&#x27;t send until you resume.");
+    expect(pausedList).not.toContain("Next send");
+    const waitingList = renderToString(
+      createElement(ScheduleList, {
+        ...listProps,
+        connectionStatus: "disconnected",
+      }),
+    );
+    expect(waitingList).toContain("Waiting for Gmail");
+    expect(waitingList).not.toContain("Next send");
     expect(
       renderToString(
         createElement(ScheduleList, {
@@ -231,6 +267,10 @@ describe("server/client prop boundaries", () => {
     );
     expect(confirmForm).toContain("Disconnect Gmail?");
     expect(confirmForm).toContain('action="/api/gmail/disconnect"');
+    const pauseButton = renderToString(
+      createElement(SchedulePauseButton, pauseButtonProps),
+    );
+    expect(pauseButton).toContain("Resume");
   });
 
   it("keeps the server pages passing only data to imported client components", () => {

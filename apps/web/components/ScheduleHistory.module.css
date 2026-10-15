@@ -37,13 +37,10 @@
   letter-spacing: -0.03em;
   overflow-wrap: anywhere;
 }
-.eyebrow {
-  margin: 0 0 6px;
-  color: var(--rm-grape-dark);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+.headerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .facts {
   display: grid;
@@ -66,6 +63,9 @@
   font-size: 16px;
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+.facts .noteWarn {
+  color: var(--rm-warn-ink);
 }
 
 .section h2 {
