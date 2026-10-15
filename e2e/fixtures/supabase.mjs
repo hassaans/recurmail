@@ -748,6 +748,26 @@ const server = createServer(async (req, res) => {
       });
       return reply(200, { allowed: true, id });
     }
+    if (url.pathname === "/rest/v1/rpc/mark_test_send_reconnect_needed") {
+      // Mirrors public.mark_test_send_reconnect_needed from migration 0009:
+      // the dead refresh token flips the connection to needs_reconnect and
+      // pauses the user's active schedules. No send_log row, no reconnect email.
+      if (req.method !== "POST")
+        return reply(405, { error: "unsupported reconnect method" });
+      const args = JSON.parse(await body(req));
+      const owner = findUser((user) => user.id === args.p_user_id);
+      if (!owner) return reply(400, { error: "invalid reconnect arguments" });
+      const connection = owner.scenario.connections.get(owner.user.id);
+      if (connection?.status === "connected")
+        connection.status = "needs_reconnect";
+      for (const schedule of owner.scenario.schedules)
+        if (
+          schedule.user_id === owner.user.id &&
+          (schedule.status === "active" || schedule.status === "sending")
+        )
+          schedule.status = "paused";
+      return reply(204);
+    }
     if (url.pathname === "/rest/v1/test_sends") {
       // Service-role only: the app never reads this table as the user. The
       // only direct access is giving a reservation back after a failed send.
