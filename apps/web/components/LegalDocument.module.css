@@ -88,6 +88,11 @@
   color: #fff;
 }
 
+/* Long URLs such as the Gmail scope must wrap on phones instead of widening the page. */
+.main code {
+  overflow-wrap: anywhere;
+}
+
 .main {
   width: min(100% - 40px, 840px);
   margin: 0 auto;
