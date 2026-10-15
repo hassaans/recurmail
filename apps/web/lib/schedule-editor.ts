@@ -349,6 +349,27 @@ export interface SummaryInput {
   at?: Date;
 }
 
+/**
+ * Turns what a user typed into the link prompt into a safe absolute URL.
+ * Bare domains get https://; only http, https and mailto links are accepted.
+ */
+export function normalizeLink(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const candidate = /^(https?:|mailto:)/i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+  try {
+    const parsed = new URL(candidate);
+    if (!["http:", "https:", "mailto:"].includes(parsed.protocol)) return null;
+    if (parsed.protocol !== "mailto:" && !parsed.hostname.includes("."))
+      return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
 /** One-line description such as "Every Monday at 9:00 AM, Pakistan Time". */
 export function describeSchedule(input: SummaryInput): string {
   const clock = formatClock(input.time);

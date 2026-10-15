@@ -7,6 +7,7 @@ import {
   describeSchedule,
   isKnownTimeZone,
   localTimeFromRule,
+  normalizeLink,
   ordinal,
   type Repeat,
   repeatFromRule,
@@ -410,7 +411,9 @@ export default function ScheduleEditor({
 
   function format(command: FormatCommand) {
     if (command === "createLink") {
-      const url = window.prompt("Link URL (http, https or mailto)");
+      const url = normalizeLink(
+        window.prompt("Link URL (http, https or mailto)") ?? "",
+      );
       if (!url) return;
       document.execCommand(command, false, url);
     } else {
