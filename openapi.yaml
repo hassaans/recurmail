@@ -421,7 +421,7 @@
             }
           },
           "429": {
-            "description": "The owner already sent 5 test emails in the last hour. Retry-After carries the wait in seconds.",
+            "description": "The owner already sent 5 test emails in the last hour. Retry-After carries the seconds until the oldest test in the window leaves it; error.retry_at carries the same instant as an ISO 8601 timestamp.",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -1052,6 +1052,11 @@
               },
               "message": {
                 "type": "string"
+              },
+              "retry_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Only with rate_limited: when the request may be retried."
               }
             }
           }

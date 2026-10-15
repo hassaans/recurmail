@@ -280,28 +280,50 @@ test("shows an error toast when Gmail rejects the send", async ({
   expect(after.testSends).toEqual([]);
 });
 
-test("stops at five test emails an hour and says when to try again", async ({
-  page,
-  context,
-  request,
-  scenario,
-}) => {
-  await prepare(request, scenario.id, "test-send", { used: 4 });
-  await signIn(page, context, scenario.connected);
-  await startDraft(page);
-  await testButton(page).click();
-  await expect(successToast(page, scenario.connected.email)).toBeVisible();
+test.describe("rate limit in the reader's time zone", () => {
+  // The owner is in Pakistan; the retry time must read in their clock, not UTC.
+  test.use({ timezoneId: "Asia/Karachi" });
 
-  await testButton(page).click();
-  const limit = page.getByRole("alert").filter({
-    hasText:
-      /You've sent 5 test emails in the last hour\. Try again at .+ UTC\./,
+  test("stops at five test emails an hour and says when to try again in local time", async ({
+    page,
+    context,
+    request,
+    scenario,
+  }) => {
+    await prepare(request, scenario.id, "test-send", { used: 4 });
+    await signIn(page, context, scenario.connected);
+    await startDraft(page);
+    await testButton(page).click();
+    await expect(successToast(page, scenario.connected.email)).toBeVisible();
+
+    await testButton(page).click();
+    const limit = page.getByRole("alert").filter({
+      hasText: /You've sent 5 test emails in the last hour\. Try again at .+\./,
+    });
+    await expect(limit).toBeVisible();
+    await expect(limit.getByRole("link")).toHaveCount(0);
+    const after = await readState(request, scenario.id);
+    expect(after.gmailMessages).toHaveLength(1);
+    expect(after.testSends).toHaveLength(5);
+
+    // The window frees up one hour after the oldest of the five sends.
+    const oldest = [...after.testSends].map((row) => row.sent_at).sort()[0];
+    const retryAt = new Date(Date.parse(oldest) + 3600000);
+    const clock = (timeZone: string) =>
+      new Intl.DateTimeFormat("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone,
+      })
+        .format(retryAt)
+        .replace(/[  ]/g, " ");
+    const text = (await limit.innerText()).replace(/[  ]/g, " ");
+    expect(text).toBe(
+      `You've sent 5 test emails in the last hour. Try again at ${clock("Asia/Karachi")}.`,
+    );
+    expect(text).not.toContain("UTC");
+    expect(text).not.toContain(clock("UTC"));
   });
-  await expect(limit).toBeVisible();
-  await expect(limit.getByRole("link")).toHaveCount(0);
-  const after = await readState(request, scenario.id);
-  expect(after.gmailMessages).toHaveLength(1);
-  expect(after.testSends).toHaveLength(5);
 });
 
 test("fits a 375px viewport with the button and keeps the sticky action bar", async ({

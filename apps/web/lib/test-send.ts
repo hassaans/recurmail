@@ -14,10 +14,9 @@ import {
   RequestError,
   scheduleJson,
 } from "./schedules";
+import { TEST_SEND_LIMIT, TEST_SEND_WINDOW_MS } from "./test-send-limit";
 
-/** How many test emails one user may send in a rolling hour. */
-export const TEST_SEND_LIMIT = 5;
-export const TEST_SEND_WINDOW_MS = 3600000;
+export { TEST_SEND_LIMIT, TEST_SEND_WINDOW_MS };
 export const TEST_SUBJECT_PREFIX = "[Test] ";
 
 /** The Gmail account a test is sent from. Only the handler ever sees the token. */
@@ -28,16 +27,29 @@ export interface TestSender {
   encrypted_refresh_token: string;
 }
 
+/**
+ * The outcome of reserving a slot in the rolling window. A refusal names the
+ * oldest send still inside the window, which is when the window frees up again
+ * once the window length is added.
+ */
+export type TestSendClaim =
+  | { allowed: true; id: string }
+  | { allowed: false; oldestSentAt: string };
+
 export interface TestSendStore {
   /** The caller's Gmail connection, or the one matching `connectionId` when it belongs to them. */
   findConnection(
     userId: string,
     connectionId?: string,
   ): Promise<TestSender | null>;
-  /** Test emails this user sent at or after `sinceIso`. */
-  countSince(userId: string, sinceIso: string): Promise<number>;
-  /** Record one sent test so it counts toward the limit. */
-  record(userId: string, sentAtIso: string): Promise<void>;
+  /**
+   * Reserve one send for this user, or learn when the window has room again.
+   * Must be atomic per user: two concurrent claims never both succeed when
+   * only one slot is left.
+   */
+  claim(userId: string): Promise<TestSendClaim>;
+  /** Give a reservation back because the email did not go out. */
+  release(userId: string, id: string): Promise<void>;
 }
 
 export class TestSendStorageError extends Error {
@@ -56,20 +68,20 @@ export function createTestSendStore(config: {
 }): TestSendStore {
   const fetcher = config.fetcher ?? fetch;
   async function request(
-    table: string,
+    path: string,
     params: Record<string, string>,
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "DELETE",
     operation: string,
     body?: unknown,
   ): Promise<Response> {
-    const url = new URL(`/rest/v1/${table}`, config.url);
+    const url = new URL(`/rest/v1/${path}`, config.url);
     url.search = new URLSearchParams(params).toString();
     const response = await fetcher(url.toString(), {
       method,
       headers: {
         apikey: config.secretKey,
         "Content-Type": "application/json",
-        ...(method === "POST" ? { Prefer: "return=minimal" } : {}),
+        ...(method === "DELETE" ? { Prefer: "return=minimal" } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
       cache: "no-store",
@@ -109,27 +121,41 @@ export function createTestSendStore(config: {
         encrypted_refresh_token: record.encrypted_refresh_token,
       };
     },
-    async countSince(userId, sinceIso) {
+    async claim(userId) {
+      // One Postgres function call does the count and the insert under a
+      // per-user lock, so the limit holds across concurrent requests.
       const response = await request(
-        "test_sends",
+        "rpc/claim_test_send",
+        {},
+        "POST",
+        "claim_test_send",
         {
-          user_id: `eq.${userId}`,
-          sent_at: `gte.${sinceIso}`,
-          select: "sent_at",
+          p_user_id: userId,
+          p_limit: TEST_SEND_LIMIT,
+          p_window_seconds: TEST_SEND_WINDOW_MS / 1000,
         },
-        "GET",
-        "count_test_sends",
       );
-      const rows: unknown = await response.json();
-      if (!Array.isArray(rows))
-        throw new TestSendStorageError("count_test_sends");
-      return rows.length;
+      const result: unknown = await response.json();
+      if (!result || typeof result !== "object")
+        throw new TestSendStorageError("claim_test_send");
+      const record = result as Record<string, unknown>;
+      if (record.allowed === true && typeof record.id === "string")
+        return { allowed: true, id: record.id };
+      if (
+        record.allowed === false &&
+        typeof record.oldest_sent_at === "string" &&
+        !Number.isNaN(Date.parse(record.oldest_sent_at))
+      )
+        return { allowed: false, oldestSentAt: record.oldest_sent_at };
+      throw new TestSendStorageError("claim_test_send");
     },
-    async record(userId, sentAtIso) {
-      await request("test_sends", {}, "POST", "record_test_send", {
-        user_id: userId,
-        sent_at: sentAtIso,
-      });
+    async release(userId, id) {
+      await request(
+        "test_sends",
+        { id: `eq.${id}`, user_id: `eq.${userId}` },
+        "DELETE",
+        "release_test_send",
+      );
     },
   };
 }
@@ -150,6 +176,47 @@ export async function resolveTestSender(
 
 function failure(status: number, code: string, message: string): Response {
   return scheduleJson({ error: { code, message } }, status);
+}
+
+/**
+ * The window has room again one window length after its oldest send. The
+ * message keeps to a relative wait so no time zone is baked in; the editor
+ * shows `retry_at` in the reader's own zone.
+ */
+function rateLimited(oldestSentAt: string, at: number): Response {
+  const retryAt = new Date(Date.parse(oldestSentAt) + TEST_SEND_WINDOW_MS);
+  const waitSeconds = Math.max(0, Math.ceil((retryAt.getTime() - at) / 1000));
+  const minutes = Math.ceil(waitSeconds / 60);
+  const wait = minutes <= 1 ? "in a minute" : `in ${minutes} minutes`;
+  return Response.json(
+    {
+      error: {
+        code: "rate_limited",
+        message: `You've sent ${TEST_SEND_LIMIT} test emails in the last hour. Try again ${wait}.`,
+        retry_at: retryAt.toISOString(),
+      },
+    },
+    {
+      status: 429,
+      headers: {
+        "Cache-Control": "no-store",
+        "Retry-After": String(waitSeconds),
+      },
+    },
+  );
+}
+
+/** A reservation that is not backed by a sent email must not count. */
+async function releaseQuietly(
+  store: TestSendStore,
+  userId: string,
+  id: string,
+): Promise<void> {
+  try {
+    await store.release(userId, id);
+  } catch {
+    console.error("[ERROR] test_send_release_failed");
+  }
 }
 
 export function createTestSendHandler(config: {
@@ -196,73 +263,59 @@ export function createTestSendHandler(config: {
       if (sender?.status !== "connected")
         return failure(409, "gmail_not_connected", "Connect Gmail first");
       const at = now();
-      const since = new Date(at - TEST_SEND_WINDOW_MS).toISOString();
-      const sent = await config.store.countSince(identity.user.id, since);
-      if (sent >= TEST_SEND_LIMIT) {
-        const retryAt = new Date(at + TEST_SEND_WINDOW_MS);
-        const time = retryAt.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-          timeZone: "UTC",
-          timeZoneName: "short",
-        });
-        return Response.json(
-          {
-            error: {
-              code: "rate_limited",
-              message: `You've sent ${TEST_SEND_LIMIT} test emails in the last hour. Try again at ${time}.`,
-              retry_at: retryAt.toISOString(),
-            },
-          },
-          {
-            status: 429,
-            headers: {
-              "Cache-Control": "no-store",
-              "Retry-After": String(Math.ceil(TEST_SEND_WINDOW_MS / 1000)),
-            },
-          },
+      // Reserve first, then send. The reservation is the record of the send;
+      // anything short of Gmail accepting the message gives it back.
+      const claim = await config.store.claim(identity.user.id);
+      if (!claim.allowed) return rateLimited(claim.oldestSentAt, at);
+      let delivered = false;
+      try {
+        const refreshToken = decryptRefreshToken(
+          sender.encrypted_refresh_token,
+          config.key,
+          identity.user.id,
         );
-      }
-      const refreshToken = decryptRefreshToken(
-        sender.encrypted_refresh_token,
-        config.key,
-        identity.user.id,
-      );
-      let accessToken: string;
-      try {
-        accessToken = await config.google.refreshAccessToken(refreshToken);
-      } catch (error) {
-        if (error instanceof GoogleTokenError && error.code === "invalid_grant")
-          return failure(
-            409,
-            "gmail_reconnect_required",
-            `Gmail access for ${sender.email} has expired. Reconnect it from the dashboard.`,
-          );
-        throw error;
-      }
-      const raw = buildMime({
-        from: sender.email,
-        to: [identity.user.email],
-        subject: `${TEST_SUBJECT_PREFIX}${content.subject}`,
-        text: content.body_text,
-        ...(content.body_html === null ? {} : { html: content.body_html }),
-        date: new Date(at),
-      });
-      try {
-        await config.google.sendMessage(accessToken, raw);
-      } catch (error) {
-        if (error instanceof GmailSendError) {
-          console.error("[ERROR] test_send_gmail_failed");
-          return failure(
-            502,
-            "gmail_send_failed",
-            "Gmail couldn't send the test email. Try again in a moment.",
-          );
+        let accessToken: string;
+        try {
+          accessToken = await config.google.refreshAccessToken(refreshToken);
+        } catch (error) {
+          if (
+            error instanceof GoogleTokenError &&
+            error.code === "invalid_grant"
+          )
+            return failure(
+              409,
+              "gmail_reconnect_required",
+              `Gmail access for ${sender.email} has expired. Reconnect it from the dashboard.`,
+            );
+          throw error;
         }
-        throw error;
+        const raw = buildMime({
+          from: sender.email,
+          to: [identity.user.email],
+          subject: `${TEST_SUBJECT_PREFIX}${content.subject}`,
+          text: content.body_text,
+          ...(content.body_html === null ? {} : { html: content.body_html }),
+          date: new Date(at),
+        });
+        try {
+          await config.google.sendMessage(accessToken, raw);
+        } catch (error) {
+          if (error instanceof GmailSendError) {
+            console.error("[ERROR] test_send_gmail_failed");
+            return failure(
+              502,
+              "gmail_send_failed",
+              "Gmail couldn't send the test email. Try again in a moment.",
+            );
+          }
+          throw error;
+        }
+        delivered = true;
+        return scheduleJson({ sent_to: identity.user.email });
+      } finally {
+        if (!delivered)
+          await releaseQuietly(config.store, identity.user.id, claim.id);
       }
-      await config.store.record(identity.user.id, new Date(at).toISOString());
-      return scheduleJson({ sent_to: identity.user.email });
     } catch (error) {
       if (error instanceof RequestError)
         return failure(error.status, error.code, error.message);
