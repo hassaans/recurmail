@@ -44,6 +44,34 @@ test("visitor can load the RecurMail homepage with its SEO data", async ({
   ).toBeVisible();
 });
 
+test("homepage nav keeps sign-in calls to action visible on desktop and mobile", async ({
+  page,
+}) => {
+  for (const width of [1280, 375, 360]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto("/");
+
+    const nav = page.getByRole("navigation", { name: "Main navigation" });
+    const login = nav.getByRole("link", { name: "Log in", exact: true });
+    const signup = nav.getByRole("link", {
+      name: "Create free account",
+      exact: true,
+    });
+    await expect(login).toBeVisible();
+    await expect(login).toHaveAttribute("href", "/dashboard");
+    await expect(signup).toBeVisible();
+    await expect(signup).toHaveAttribute("href", "/auth/signin");
+    await expect(page.getByText("Launching soon", { exact: true })).toHaveCount(
+      0,
+    );
+    const pageWidths = await page.evaluate(() => ({
+      document: document.documentElement.scrollWidth,
+      viewport: document.documentElement.clientWidth,
+    }));
+    expect(pageWidths.document).toBeLessThanOrEqual(pageWidths.viewport);
+  }
+});
+
 test("crawler routes list the homepage and both guides", async ({
   request,
 }) => {

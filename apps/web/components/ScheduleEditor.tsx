@@ -3,6 +3,7 @@
 import { nextOccurrence, presets, type Weekday } from "@recurmail/core";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import BrandMark from "./BrandMark";
 import styles from "./ScheduleEditor.module.css";
 
 type Repeat = "daily" | "weekdays" | "weekly" | "monthly" | "custom";
@@ -283,7 +284,12 @@ export default function ScheduleEditor({
         Skip to schedule editor
       </a>
       <header className={styles.header}>
-        <a className={styles.logo} href="/dashboard">
+        <a
+          className={styles.logo}
+          href="/dashboard"
+          aria-label="RecurMail home"
+        >
+          <BrandMark />
           RecurMail
         </a>
         <a href="/dashboard">Dashboard</a>

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import BrandMark from "../components/BrandMark";
 
 const siteUrl = "https://recurmail.com";
 
@@ -129,8 +130,10 @@ section { padding: 88px 0; }
 .nav-links { display: flex; align-items: center; justify-content: flex-end; gap: 24px; flex-wrap: wrap; margin: 0; padding: 0; list-style: none; }
 .nav-links a { color: var(--rm-ink-2); font-size: 15px; font-weight: 500; text-decoration: none; }
 .nav-links a:hover, .guide-link:hover { color: var(--rm-grape-dark); }
+.nav-links a.nav-primary { padding: 11px 16px; border-radius: var(--rm-radius-pill); background: var(--rm-grape); color: #fff; font-weight: 600; white-space: nowrap; }
+.nav-links a.nav-primary:hover { background: var(--rm-grape-dark); color: #fff; }
+.nav-links a.nav-login { white-space: nowrap; }
 .pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border: 1px solid var(--rm-line); border-radius: var(--rm-radius-pill); background: var(--rm-paper); color: var(--rm-ink-2); font-size: 14px; font-weight: 500; }
-.pill-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rm-teal); }
 .hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); align-items: center; gap: 56px; padding: 48px 0 72px; }
 .hero h1 em { padding: 0 4px; margin: 0 -4px; background: linear-gradient(transparent 64%, var(--rm-sun) 64%, var(--rm-sun) 92%, transparent 92%); color: var(--rm-grape); font-style: normal; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .eyebrow { display: inline-block; margin-bottom: 14px; color: var(--rm-grape-dark); font-size: 14px; font-weight: 600; letter-spacing: 0.02em; }
@@ -224,31 +227,8 @@ footer p { color: var(--rm-muted); }
 @media (prefers-reduced-motion: no-preference) { .float { animation: float 6s ease-in-out infinite; } @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
 @media (max-width: 900px) { .hero, .limit { grid-template-columns: minmax(0, 1fr); gap: 40px; } .steps, .cal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hero-art { max-width: 650px; } }
-@media (max-width: 620px) { body { font-size: 16px; } .wrap { width: min(100% - 40px, 1120px); } .nav { align-items: flex-start; flex-direction: column; gap: 14px; } .nav-links { justify-content: flex-start; gap: 10px 18px; } .nav-links .launch-status { display: none; } .steps, .cal-grid, .ways, .privacy, .guide-links { grid-template-columns: minmax(0, 1fr); } section { padding: 64px 0; } .hero { gap: 34px; padding: 34px 0 56px; } .hero-art { padding-right: 0; } .repeat { margin-inline: 12px; padding: 12px; } .compose-top, .field { padding-inline: 14px; } .compose-body { padding-inline: 14px; } .closing { margin-bottom: 64px; padding: 48px 24px; border-radius: 22px; } }
+@media (max-width: 620px) { body { font-size: 16px; } .wrap { width: min(100% - 40px, 1120px); } .nav { align-items: flex-start; flex-direction: column; gap: 14px; } .nav-links { justify-content: flex-start; gap: 10px 18px; } .steps, .cal-grid, .ways, .privacy, .guide-links { grid-template-columns: minmax(0, 1fr); } section { padding: 64px 0; } .hero { gap: 34px; padding: 34px 0 56px; } .hero-art { padding-right: 0; } .repeat { margin-inline: 12px; padding: 12px; } .compose-top, .field { padding-inline: 14px; } .compose-body { padding-inline: 14px; } .closing { margin-bottom: 64px; padding: 48px 24px; border-radius: 22px; } }
 `;
-
-function BrandMark() {
-  return (
-    <svg viewBox="0 0 64 64" aria-hidden="true">
-      <rect width="64" height="64" rx="16" fill="#6D3BEF" />
-      <path
-        d="M44 22a15 15 0 1 0 4 12"
-        fill="none"
-        stroke="#FFFFFF"
-        strokeWidth="6"
-        strokeLinecap="round"
-      />
-      <path
-        d="M38 14l8 8-9 5"
-        fill="none"
-        stroke="#FFFFFF"
-        strokeWidth="6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 function SiteHeader() {
   return (
@@ -265,11 +245,15 @@ function SiteHeader() {
           <li>
             <a href="#faq">FAQ</a>
           </li>
-          <li className="launch-status">
-            <span className="pill">
-              <span className="pill-dot" aria-hidden="true" />
-              Launching soon
-            </span>
+          <li>
+            <a className="nav-login" href="/dashboard">
+              Log in
+            </a>
+          </li>
+          <li>
+            <a className="nav-primary" href="/auth/signin">
+              Create free account
+            </a>
           </li>
         </ul>
       </nav>
@@ -328,8 +312,8 @@ export default function HomePage() {
                 replies come back to you. It is free to use.
               </p>
               <div className="hero-cta">
-                <a className="btn btn-primary" href="#how-it-works">
-                  See how it works
+                <a className="btn btn-primary" href="/auth/signin">
+                  Create free account
                   <svg
                     width="18"
                     height="18"
@@ -341,11 +325,11 @@ export default function HomePage() {
                     strokeLinejoin="round"
                     aria-hidden="true"
                   >
-                    <path d="M12 5v14M5 12l7 7 7-7" />
+                    <path d="M5 12h14M13 6l6 6-6 6" />
                   </svg>
                 </a>
-                <a className="btn btn-ghost" href="#faq">
-                  Read the FAQ
+                <a className="btn btn-ghost" href="#how-it-works">
+                  See how it works
                 </a>
               </div>
               <div className="hero-note">
@@ -673,8 +657,8 @@ export default function HomePage() {
           <div className="closing">
             <h2>Set up a message to repeat</h2>
             <p>Choose the recipients, write the email, and set its schedule.</p>
-            <a className="btn" href="#how-it-works">
-              See how it works
+            <a className="btn" href="/auth/signin">
+              Create free account
             </a>
           </div>
         </div>
