@@ -40,7 +40,14 @@ export default function TermsPage() {
         schedules, stored Gmail token and related send history from RecurMail.
       </p>
       <h2>Contact</h2>
-      <p>Owner placeholder. Add the legal entity name and mailing address.</p>
+      <p>
+        RecurMail is run by Hassaan Saleem. For help with your account, email{" "}
+        <a href="mailto:support@recurmail.com">support@recurmail.com</a>. For
+        privacy questions, email{" "}
+        <a href="mailto:privacy@recurmail.com">privacy@recurmail.com</a>. For
+        legal questions, email{" "}
+        <a href="mailto:legal@recurmail.com">legal@recurmail.com</a>.
+      </p>
     </LegalDocument>
   );
 }
