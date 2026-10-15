@@ -230,6 +230,8 @@ describe("server/client prop boundaries", () => {
   it("round-trips representative client component props through JSON", () => {
     const editorProps: ComponentProps<typeof ScheduleEditor> = {
       scheduleId: "c4a7b913-3d35-4c0d-8e7c-4c5d101f3f88",
+      userEmail: "owner@example.test",
+      senderEmail: "owner@gmail.com",
     };
 
     expect(JSON.parse(JSON.stringify(editorProps))).toEqual(editorProps);
@@ -246,7 +248,11 @@ describe("server/client prop boundaries", () => {
   it("renders each client component with react-dom/server", () => {
     expect(
       renderToString(
-        createElement(ScheduleEditor, { scheduleId: "schedule-123" }),
+        createElement(ScheduleEditor, {
+          scheduleId: "schedule-123",
+          userEmail: "owner@example.test",
+          senderEmail: "owner@gmail.com",
+        }),
       ),
     ).toContain("Edit schedule");
     const list = renderToString(createElement(ScheduleList, listProps));

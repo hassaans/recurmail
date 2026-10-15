@@ -8,7 +8,9 @@
     "SENTRY_CRON_MONITOR_SLUG",
     "SENTRY_DSN",
     "SUPABASE_SECRET_KEY",
-    "SUPABASE_SECRET_KEYS"
+    "SUPABASE_SECRET_KEYS",
+    "RECURMAIL_E2E_WEB_PORT",
+    "RECURMAIL_E2E_FAKE_PORT"
   ],
   "tasks": {
     "typecheck": {

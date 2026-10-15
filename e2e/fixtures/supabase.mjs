@@ -6,9 +6,12 @@ import {
 } from "node:crypto";
 import { createServer } from "node:http";
 
-// Local fake OAuth/Supabase boundary, never loaded by the application.
-const origin = "http://127.0.0.1:3101";
-const appOrigin = "http://127.0.0.1:3100";
+// Local fake OAuth/Supabase/Gmail boundary, never loaded by the application.
+// Ports default to 3100/3101 (CI); both env vars let a second copy run alongside.
+const fakePort = process.env.RECURMAIL_E2E_FAKE_PORT?.trim() || "3101";
+const webPort = process.env.RECURMAIL_E2E_WEB_PORT?.trim() || "3100";
+const origin = `http://127.0.0.1:${fakePort}`;
+const appOrigin = `http://127.0.0.1:${webPort}`;
 const gmailScope = "https://www.googleapis.com/auth/gmail.send";
 const publicColumns = "user_id,google_email,is_workspace,status,connected_at";
 const scheduleColumns = [
@@ -99,6 +102,7 @@ function newScenario() {
       [connected, reconnect].map((user) => [
         user.id,
         {
+          id: randomUUID(),
           user_id: user.id,
           google_email: user.email,
           is_workspace: user === reconnect,
@@ -119,9 +123,47 @@ function newScenario() {
     exchanges: [],
     deletedUserIds: new Set(),
     revokeFails: false,
+    // Fake Gmail: messages accepted by users/me/messages/send, parsed headers only.
+    gmailMessages: [],
+    testSends: [],
+    expiredGrant: false,
+    gmailFails: false,
   };
   scenarios.set(scenario.id, scenario);
   return scenario;
+}
+
+/** Give the already-connected personal account a real, decryptable refresh token. */
+function connectForTestSend(scenario) {
+  const connection = scenario.connections.get(scenario.connected.id);
+  connection.encrypted_refresh_token = encryptedToken(
+    scenario.gmailRefreshToken,
+    scenario.connected.id,
+  );
+  return { user_id: scenario.connected.id, connection_id: connection.id };
+}
+
+/** RFC 2822 headers from a Gmail `raw` message; folded lines are unfolded. */
+function parseMimeHeaders(raw) {
+  const message = Buffer.from(raw, "base64url").toString("utf8");
+  const [block, ...parts] = message.split("\r\n\r\n");
+  const headers = {};
+  for (const line of block.replace(/\r\n[ \t]/g, " ").split("\r\n")) {
+    const colon = line.indexOf(":");
+    if (colon > 0)
+      headers[line.slice(0, colon).toLowerCase()] = line
+        .slice(colon + 1)
+        .trim();
+  }
+  // Body parts are base64 wrapped at 76 characters, a multiple of 4, so each
+  // line decodes alone. `text` holds the words the user typed.
+  const text = parts
+    .join("\r\n\r\n")
+    .split("\r\n")
+    .filter((line) => /^[A-Za-z0-9+/]+=*$/.test(line))
+    .map((line) => Buffer.from(line, "base64").toString("utf8"))
+    .join("\n");
+  return { headers, message, text };
 }
 
 function findUser(predicate) {
@@ -143,7 +185,7 @@ async function body(req) {
   return raw;
 }
 
-createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   const url = new URL(req.url, origin);
   const reply = (status, data) => {
     res.writeHead(status, { "Content-Type": "application/json" });
@@ -163,6 +205,10 @@ createServer(async (req, res) => {
         exchanges,
         deletedUserIds,
         revokeFails,
+        gmailMessages,
+        testSends,
+        expiredGrant,
+        gmailFails,
         ...scenario
       } = newScenario();
       return reply(201, scenario);
@@ -190,6 +236,29 @@ createServer(async (req, res) => {
       if (setup === "revoke-failure" && req.method === "POST") {
         scenario.revokeFails = true;
         return reply(200, { revoke_fails: true });
+      }
+      if (setup === "test-send" && req.method === "POST") {
+        // Optional `used`: test emails already sent by this user in the last hour.
+        const input = JSON.parse((await body(req)) || "{}");
+        const used = Number.isInteger(input.used) ? input.used : 0;
+        for (let index = 0; index < used; index += 1)
+          scenario.testSends.push({
+            id: randomUUID(),
+            user_id: scenario.connected.id,
+            sent_at: new Date(Date.now() - (index + 1) * 60000).toISOString(),
+          });
+        return reply(200, { ...connectForTestSend(scenario), used });
+      }
+      if (setup === "expired-grant" && req.method === "POST") {
+        scenario.expiredGrant = true;
+        return reply(200, { ...connectForTestSend(scenario), expired: true });
+      }
+      if (setup === "gmail-failure" && req.method === "POST") {
+        scenario.gmailFails = true;
+        return reply(200, {
+          ...connectForTestSend(scenario),
+          gmail_fails: true,
+        });
       }
       if (setup === "schedule-api" && req.method === "POST") {
         // Isolate forecasts for the already-connected personal Gmail account.
@@ -278,6 +347,8 @@ createServer(async (req, res) => {
         revokedTokens: scenario.revokedTokens,
         exchanges: scenario.exchanges,
         deletedUserIds: [...scenario.deletedUserIds],
+        gmailMessages: scenario.gmailMessages,
+        testSends: scenario.testSends,
       });
     }
     if (
@@ -380,6 +451,25 @@ createServer(async (req, res) => {
     }
     if (url.pathname === "/token" && req.method === "POST") {
       const data = new URLSearchParams(await body(req));
+      if (data.get("grant_type") === "refresh_token") {
+        const scenario = [...scenarios.values()].find(
+          (candidate) =>
+            candidate.gmailRefreshToken === data.get("refresh_token"),
+        );
+        if (
+          !scenario ||
+          scenario.expiredGrant ||
+          data.get("client_id") !== "fake-google-client" ||
+          data.get("client_secret") !== "fake-google-secret"
+        )
+          return reply(400, { error: "invalid_grant" });
+        return reply(200, {
+          access_token: scenario.gmailAccessToken,
+          scope: gmailScope,
+          token_type: "Bearer",
+          expires_in: 3600,
+        });
+      }
       const grant = codes.get(data.get("code"));
       codes.delete(data.get("code"));
       if (
@@ -430,6 +520,28 @@ createServer(async (req, res) => {
         return reply(503, { error: "provider unavailable" });
       scenario.revokedTokens.push(token);
       return reply(200, {});
+    }
+    if (
+      url.pathname === "/gmail/v1/users/me/messages/send" &&
+      req.method === "POST"
+    ) {
+      const token = req.headers.authorization?.replace(/^Bearer /, "");
+      const scenario = [...scenarios.values()].find(
+        (candidate) => candidate.gmailAccessToken === token,
+      );
+      if (!scenario)
+        return reply(401, { error: { code: 401, message: "invalid grant" } });
+      if (scenario.gmailFails)
+        return reply(500, { error: { code: 500, message: "backend error" } });
+      const { raw } = JSON.parse(await body(req));
+      if (typeof raw !== "string" || !raw)
+        return reply(400, { error: { code: 400, message: "raw required" } });
+      scenario.gmailMessages.push(parseMimeHeaders(raw));
+      return reply(200, {
+        id: `fake-gmail-message-${scenario.gmailMessages.length}`,
+        threadId: "fake-gmail-thread",
+        labelIds: ["SENT"],
+      });
     }
     const bearer = req.headers.authorization?.replace(/^Bearer /, "");
     const identity = findUser((user) => user.accessToken === bearer);
@@ -607,11 +719,72 @@ createServer(async (req, res) => {
       target.scenario.connections.set(row.user_id, row);
       return reply(204);
     }
+    if (url.pathname === "/rest/v1/test_sends") {
+      // Service-role only: the app never reads this table as the user.
+      if (req.method === "POST") {
+        const row = JSON.parse(await body(req));
+        const owner = findUser((user) => user.id === row.user_id);
+        if (!owner || typeof row.sent_at !== "string")
+          return reply(400, { error: "invalid test send row" });
+        owner.scenario.testSends.push({
+          id: randomUUID(),
+          user_id: row.user_id,
+          sent_at: row.sent_at,
+        });
+        return reply(201);
+      }
+      if (req.method === "GET") {
+        const owner = findUser(
+          (user) => `eq.${user.id}` === url.searchParams.get("user_id"),
+        );
+        const since = url.searchParams.get("sent_at");
+        if (
+          !owner ||
+          !since?.startsWith("gte.") ||
+          url.searchParams.get("select") !== "sent_at"
+        )
+          return reply(400, { error: "invalid test send filter" });
+        const floor = since.slice("gte.".length);
+        return reply(
+          200,
+          owner.scenario.testSends
+            .filter(
+              (row) => row.user_id === owner.user.id && row.sent_at >= floor,
+            )
+            .map((row) => ({ sent_at: row.sent_at })),
+        );
+      }
+      return reply(405, { error: "unsupported test send method" });
+    }
     const target = findUser(
       (user) => `eq.${user.id}` === url.searchParams.get("user_id"),
     );
     if (!target) return reply(400, { error: "invalid owner filter" });
     if (url.pathname === "/rest/v1/gmail_connections") {
+      if (
+        req.method === "GET" &&
+        url.searchParams.get("select") ===
+          "id,google_email,is_workspace,status,encrypted_refresh_token"
+      ) {
+        const idFilter = url.searchParams.get("id");
+        if (idFilter !== null && !idFilter.startsWith("eq."))
+          return reply(400, { error: "unsupported connection filter" });
+        const row = target.scenario.connections.get(target.user.id);
+        const rows =
+          row && (idFilter === null || `eq.${row.id}` === idFilter)
+            ? [row]
+            : [];
+        return reply(
+          200,
+          rows.map((connection) => ({
+            id: connection.id,
+            google_email: connection.google_email,
+            is_workspace: connection.is_workspace,
+            status: connection.status,
+            encrypted_refresh_token: connection.encrypted_refresh_token,
+          })),
+        );
+      }
       if (
         req.method === "GET" &&
         url.searchParams.get("select") === "encrypted_refresh_token"
@@ -673,4 +846,11 @@ createServer(async (req, res) => {
   } catch {
     return reply(400, { error: "invalid fake request" });
   }
-}).listen(3101, "127.0.0.1");
+});
+
+// Node closes idle keep-alive sockets server-side after 5 s by default, the
+// same moment the Node 22 agent behind the Playwright request fixture may reuse
+// one. A request written into that close fails with ECONNRESET during scenario
+// cleanup. Leave idle sockets to the clients, which close them themselves.
+server.keepAliveTimeout = 0;
+server.listen(Number(fakePort), "127.0.0.1");

@@ -366,6 +366,95 @@
           }
         }
       }
+    },
+    "/api/schedules/test": {
+      "post": {
+        "operationId": "sendTestEmail",
+        "summary": "Send the current draft to the signed-in user as a test",
+        "description": "Sends the draft subject and body through the owner's connected Gmail account to the owner's own sign-in address only. Any recipients in the request are ignored. The subject gets a \"[Test] \" prefix. Nothing is saved to the schedule or its send history. Limited to 5 tests per user per rolling hour.",
+        "tags": [
+          "Schedules"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestSendInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The test email was handed to Gmail.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestSendResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "No connected Gmail account (gmail_not_connected), or Gmail access has expired and must be reconnected from the dashboard (gmail_reconnect_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The owner already sent 5 test emails in the last hour. Retry-After carries the wait in seconds.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "502": {
+            "description": "Gmail rejected or failed the send (gmail_send_failed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -891,6 +980,48 @@
           }
         }
       },
+      "TestSendInput": {
+        "type": "object",
+        "required": [
+          "subject",
+          "body_text"
+        ],
+        "properties": {
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 998
+          },
+          "body_text": {
+            "type": "string",
+            "maxLength": 100000
+          },
+          "body_html": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100000,
+            "description": "Sanitized with the same rules as saving a schedule before it is sent."
+          },
+          "gmail_connection_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional. Which of the owner's Gmail connections sends the test. Must belong to the owner; otherwise 409 gmail_not_connected."
+          }
+        }
+      },
+      "TestSendResult": {
+        "type": "object",
+        "required": [
+          "sent_to"
+        ],
+        "properties": {
+          "sent_to": {
+            "$ref": "#/components/schemas/Email"
+          }
+        }
+      },
       "Error": {
         "type": "object",
         "required": [
@@ -911,6 +1042,10 @@
                   "unauthenticated",
                   "forbidden_origin",
                   "not_found",
+                  "gmail_not_connected",
+                  "gmail_reconnect_required",
+                  "rate_limited",
+                  "gmail_send_failed",
                   "internal_error",
                   "unavailable"
                 ]

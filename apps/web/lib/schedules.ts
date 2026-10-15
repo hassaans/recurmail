@@ -85,7 +85,7 @@ const editableFields = [
   "source",
 ] as const;
 
-class RequestError extends Error {
+export class RequestError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
@@ -99,7 +99,7 @@ function invalid(message: string): never {
   throw new RequestError(400, "invalid_input", message);
 }
 
-function objectInput(value: unknown): Record<string, unknown> {
+export function objectInput(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
     invalid("Expected a JSON object");
   return value as Record<string, unknown>;
@@ -152,8 +152,18 @@ function occurrence(rrule: string, timezone: string, at: Date): Date | null {
   }
 }
 
-function normalize(value: unknown, at: Date): ScheduleInput {
-  const input = objectInput(value);
+export type MessageContent = Pick<
+  ScheduleInput,
+  "subject" | "body_text" | "body_html"
+>;
+
+/**
+ * Subject and body rules shared by saving a schedule and sending a test. The
+ * HTML body comes back sanitized, so both paths persist or send the same markup.
+ */
+export function normalizeMessageContent(
+  input: Record<string, unknown>,
+): MessageContent {
   const subject = stringInput(input.subject, "subject", 1, 998);
   if (
     [...subject].some(
@@ -167,8 +177,20 @@ function normalize(value: unknown, at: Date): ScheduleInput {
     !Object.hasOwn(input, "body_html") || input.body_html === null
       ? null
       : stringInput(input.body_html, "body_html", 0, 100000);
-  const safeBodyHtml =
-    body_html === null ? null : sanitizeScheduleHtml(body_html);
+  return {
+    subject,
+    body_text,
+    body_html: body_html === null ? null : sanitizeScheduleHtml(body_html),
+  };
+}
+
+function normalize(value: unknown, at: Date): ScheduleInput {
+  const input = objectInput(value);
+  const {
+    subject,
+    body_text,
+    body_html: safeBodyHtml,
+  } = normalizeMessageContent(input);
   const to = recipients(input.to, "to");
   const cc = Object.hasOwn(input, "cc") ? recipients(input.cc, "cc") : [];
   const bcc = Object.hasOwn(input, "bcc") ? recipients(input.bcc, "bcc") : [];

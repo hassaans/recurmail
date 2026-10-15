@@ -12,6 +12,7 @@ import {
   createSupabaseAuth,
   type SignedInUser,
 } from "./supabase-auth";
+import { createTestSendHandler, createTestSendStore } from "./test-send";
 
 type DashboardState =
   | { kind: "signed_out" | "refresh" | "unavailable" }
@@ -29,6 +30,7 @@ interface RuntimeConfig {
   googleClientId: string;
   googleClientSecret: string;
   testOAuthOrigin?: string;
+  testGmailOrigin?: string;
   fetcher?: typeof fetch;
 }
 
@@ -53,6 +55,7 @@ export function createRuntime(config: RuntimeConfig) {
     clientId: config.googleClientId,
     clientSecret: config.googleClientSecret,
     testOAuthOrigin: config.testOAuthOrigin,
+    testGmailOrigin: config.testGmailOrigin,
     fetcher: config.fetcher,
   });
   const googleSignIn = createGoogleSignIn({
@@ -95,6 +98,17 @@ export function createRuntime(config: RuntimeConfig) {
       store: createScheduleStore({
         url: config.supabaseUrl,
         publishableKey: config.publishableKey,
+        fetcher: config.fetcher,
+      }),
+    }),
+    testSend: createTestSendHandler({
+      origin: config.origin,
+      key: config.key,
+      authenticate,
+      google,
+      store: createTestSendStore({
+        url: config.supabaseUrl,
+        secretKey: config.secretKey,
         fetcher: config.fetcher,
       }),
     }),
@@ -161,6 +175,18 @@ export async function runScheduleRoute(
   return runtime.schedules[operation](request, id);
 }
 
+export async function runTestSendRoute(request: Request): Promise<Response> {
+  const runtime = configuredRuntime();
+  if (!runtime)
+    return scheduleJson(
+      {
+        error: { code: "unavailable", message: "Schedule API is unavailable" },
+      },
+      503,
+    );
+  return runtime.testSend(request);
+}
+
 export function configuredRuntime(): ReturnType<typeof createRuntime> | null {
   const env = process.env;
   if (
@@ -192,6 +218,7 @@ export function configuredRuntime(): ReturnType<typeof createRuntime> | null {
       googleClientId: env.GOOGLE_CLIENT_ID,
       googleClientSecret: env.GOOGLE_CLIENT_SECRET,
       testOAuthOrigin: env.RECURMAIL_TEST_OAUTH_ORIGIN,
+      testGmailOrigin: env.RECURMAIL_TEST_GMAIL_ORIGIN,
     });
   } catch {
     console.error("[ERROR] runtime_configuration_failed");
