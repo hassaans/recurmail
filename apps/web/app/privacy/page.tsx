@@ -75,7 +75,12 @@ export default function PrivacyPage() {
         RecurMail still deletes the account and stored token.
       </p>
       <h2>Contact</h2>
-      <p>Owner placeholder. Add the legal entity name and mailing address.</p>
+      <p>
+        RecurMail is run by Hassaan Saleem. For help with your account, email{" "}
+        <a href="mailto:support@recurmail.com">support@recurmail.com</a>. For
+        privacy or legal questions, email{" "}
+        <a href="mailto:hassaan@recurmail.com">hassaan@recurmail.com</a>.
+      </p>
     </LegalDocument>
   );
 }
