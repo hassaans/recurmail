@@ -23,6 +23,7 @@ const requiredOperations = [
   ["/api/schedules/{id}/pause", "post"],
   ["/api/schedules/{id}/resume", "post"],
   ["/api/schedules/pause-all", "post"],
+  ["/api/schedules/test", "post"],
 ] as const;
 
 interface Operation {

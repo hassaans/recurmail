@@ -7,6 +7,7 @@ mkdirSync(directory, { recursive: true });
 const log = createWriteStream(new URL("web-server.log", directory), {
   flags: "w",
 });
+const port = process.env.RECURMAIL_E2E_WEB_PORT?.trim() || "3100";
 const child = spawn(
   "pnpm",
   [
@@ -16,7 +17,7 @@ const child = spawn(
     "--hostname",
     "127.0.0.1",
     "--port",
-    "3100",
+    port,
   ],
   {
     cwd: new URL("../../", import.meta.url),

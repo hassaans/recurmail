@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createGoogleProvider } from "../lib/google";
+import {
+  createGoogleProvider,
+  GmailSendError,
+  GoogleTokenError,
+} from "../lib/google";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -200,6 +204,117 @@ describe("separate Gmail OAuth provider", () => {
       ).rejects.toThrow("Gmail permission could not be granted");
     },
   );
+
+  it("refreshes access tokens and sends mail through the loopback Gmail origin outside production", async () => {
+    vi.stubEnv("NODE_ENV", "test");
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ access_token: "fake-gmail-access", expires_in: 3600 }),
+      )
+      .mockResolvedValueOnce(Response.json({ id: "fake-message" }));
+    const google = createGoogleProvider({
+      clientId: "id",
+      clientSecret: "secret",
+      testOAuthOrigin: "http://127.0.0.1:3101",
+      testGmailOrigin: "http://127.0.0.1:3101",
+      fetcher,
+    });
+    await expect(google.refreshAccessToken("fake-refresh")).resolves.toBe(
+      "fake-gmail-access",
+    );
+    await google.sendMessage("fake-gmail-access", "cmF3");
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      "http://127.0.0.1:3101/token",
+      "http://127.0.0.1:3101/gmail/v1/users/me/messages/send",
+    ]);
+    const refresh = new URLSearchParams(fetcher.mock.calls[0][1].body);
+    expect(refresh.get("grant_type")).toBe("refresh_token");
+    expect(refresh.get("refresh_token")).toBe("fake-refresh");
+    expect(refresh.get("client_id")).toBe("id");
+    expect(refresh.get("client_secret")).toBe("secret");
+    expect(fetcher.mock.calls[1][1].headers.authorization).toBe(
+      "Bearer fake-gmail-access",
+    );
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({ raw: "cmF3" });
+  });
+
+  it("uses the real Gmail origin in production even when a test origin is set", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ id: "sent" }));
+    const google = createGoogleProvider({
+      clientId: "id",
+      clientSecret: "secret",
+      testGmailOrigin: "http://127.0.0.1:3101",
+      fetcher,
+    });
+    await google.sendMessage("token", "cmF3");
+    expect(fetcher.mock.calls[0][0]).toBe(
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+    );
+  });
+
+  it.each([
+    "https://attacker.test",
+    "http://127.0.0.1.attacker.test",
+    "http://0.0.0.0:3101",
+    "http://127.0.0.1:3101/path",
+    "bad-url",
+  ])("rejects unsafe test Gmail endpoint %s", (testGmailOrigin) => {
+    vi.stubEnv("NODE_ENV", "test");
+    expect(() =>
+      createGoogleProvider({
+        clientId: "id",
+        clientSecret: "secret",
+        testGmailOrigin,
+      }),
+    ).toThrow("Test Gmail endpoint must be a loopback origin");
+  });
+
+  it("distinguishes an expired grant from other token failures", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ error: "invalid_grant" }, { status: 400 }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ error: "fake-secret-detail" }, { status: 503 }),
+      )
+      .mockResolvedValueOnce(Response.json({ expires_in: 3600 }));
+    const google = createGoogleProvider({
+      clientId: "id",
+      clientSecret: "secret",
+      fetcher,
+    });
+    const expired = google.refreshAccessToken("fake-refresh");
+    await expect(expired).rejects.toBeInstanceOf(GoogleTokenError);
+    await expect(expired).rejects.toMatchObject({ code: "invalid_grant" });
+    const outage = google.refreshAccessToken("fake-refresh");
+    await expect(outage).rejects.toMatchObject({ code: "token_failed" });
+    await expect(outage).rejects.not.toThrow("fake-secret-detail");
+    await expect(
+      google.refreshAccessToken("fake-refresh"),
+    ).rejects.toMatchObject({ code: "token_failed" });
+  });
+
+  it("reports Gmail send failures by status only", async () => {
+    const google = createGoogleProvider({
+      clientId: "id",
+      clientSecret: "secret",
+      fetcher: vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { error: { message: "fake-secret-detail" } },
+            { status: 429 },
+          ),
+        ),
+    });
+    const failure = google.sendMessage("token", "cmF3");
+    await expect(failure).rejects.toBeInstanceOf(GmailSendError);
+    await expect(failure).rejects.toMatchObject({ status: 429 });
+    await expect(failure).rejects.not.toThrow("fake-secret-detail");
+  });
 
   it("treats an already-invalid token as revoked but surfaces temporary failures", async () => {
     const fetcher = vi
