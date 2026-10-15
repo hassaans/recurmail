@@ -483,14 +483,8 @@ test.describe("without a working Gmail connection", () => {
     ).toHaveCount(0);
     await expect(row.getByRole("link", { name: "History" })).toBeVisible();
 
-    // Pausing still works while the account needs reconnecting. The row
-    // keeps asking for the reconnect and does not offer Resume until then.
-    await row.getByRole("button", { name: "Pause", exact: true }).click();
-    await expect(status(page, "Paused “Fixture reminder”.")).toBeVisible();
-    await expect(row).toContainText("Status Needs reconnect");
-    await expect(row).toContainText(
-      `Paused until you reconnect ${scenario.reconnect.email}.`,
-    );
+    // The failed send already paused the schedule, so there is nothing to
+    // pause, and Resume is not offered until the account is reconnected.
     await expect(
       row.getByRole("button", { name: "Resume", exact: true }),
     ).toHaveCount(0);

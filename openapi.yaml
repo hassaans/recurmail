@@ -796,6 +796,11 @@
             "required": [
               "source"
             ]
+          },
+          {
+            "required": [
+              "gmail_connection_id"
+            ]
           }
         ],
         "description": "Only provided editable fields are written. The resulting schedule must satisfy ScheduleInput validation, including at least one recipient. Changing RRULE or timezone recomputes next_send_at strictly after now; other edits retain it. Ownership, IDs, lifecycle and timestamps cannot be supplied."

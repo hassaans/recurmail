@@ -235,8 +235,8 @@ export default async function Dashboard({
             <p>
               <strong>Gmail needs reconnecting</strong>
               {connections.length === 1
-                ? "Your Gmail permission needs renewing. Reconnect Gmail to resume your scheduled emails."
-                : "Every Gmail account you connected needs its permission renewed. Reconnect one to resume its scheduled emails."}
+                ? "Your Gmail permission needs renewing. Reconnect Gmail, then resume the schedules it paused."
+                : "Every Gmail account you connected needs its permission renewed. Reconnect one, then resume the schedules it paused."}
             </p>
             {connections.length === 1 ? (
               <form

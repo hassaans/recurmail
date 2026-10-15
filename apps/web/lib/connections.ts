@@ -46,6 +46,15 @@ export class ConnectionLimitError extends Error {
   }
 }
 
+/** A PostgREST response that was not ok, keeping the status for callers that can recover from one. */
+class ConnectionStorageError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super("Connection storage failed");
+    this.status = status;
+  }
+}
+
 export const isConnectionId = (id: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
@@ -89,7 +98,7 @@ export function createConnectionStore(config: {
       ...(body ? { body: JSON.stringify(body) } : {}),
       cache: "no-store",
     });
-    if (!response.ok) throw new Error("Connection storage failed");
+    if (!response.ok) throw new ConnectionStorageError(response.status);
     return response;
   }
   async function rows(
@@ -158,25 +167,24 @@ export function createConnectionStore(config: {
         .filter((token): token is string => typeof token === "string");
     },
     async save(connection) {
-      // The address is unique per user ignoring case, so find the existing
-      // row by comparing lower-cased addresses rather than relying on an
-      // upsert, which cannot target an expression index through PostgREST.
-      const existing = await rows(
-        "gmail_connections",
-        { user_id: `eq.${connection.user_id}`, select: "id,google_email" },
-        undefined,
-        true,
-      );
       const wanted = connection.google_email.toLowerCase();
-      const match = existing.find(
-        (row) =>
-          typeof row.google_email === "string" &&
-          row.google_email.toLowerCase() === wanted,
-      );
-      if (match) {
-        await request(
+      const ownRows = () =>
+        rows(
           "gmail_connections",
-          { id: `eq.${String(match.id)}`, user_id: `eq.${connection.user_id}` },
+          { user_id: `eq.${connection.user_id}`, select: "id,google_email" },
+          undefined,
+          true,
+        );
+      const sameAddress = (list: Record<string, unknown>[]) =>
+        list.find(
+          (row) =>
+            typeof row.google_email === "string" &&
+            row.google_email.toLowerCase() === wanted,
+        );
+      const update = (id: unknown) =>
+        request(
+          "gmail_connections",
+          { id: `eq.${String(id)}`, user_id: `eq.${connection.user_id}` },
           "PATCH",
           undefined,
           true,
@@ -188,18 +196,37 @@ export function createConnectionStore(config: {
             connected_at: connection.connected_at,
           },
         );
+      // The address is unique per user ignoring case, so find the existing
+      // row by comparing lower-cased addresses rather than relying on an
+      // upsert, which cannot target an expression index through PostgREST.
+      const existing = await ownRows();
+      const match = sameAddress(existing);
+      if (match) {
+        await update(match.id);
         return;
       }
       if (existing.length >= MAX_GMAIL_CONNECTIONS)
         throw new ConnectionLimitError();
-      await request(
-        "gmail_connections",
-        {},
-        "POST",
-        undefined,
-        true,
-        connection,
-      );
+      try {
+        await request(
+          "gmail_connections",
+          {},
+          "POST",
+          undefined,
+          true,
+          connection,
+        );
+      } catch (error) {
+        // Two consents for the same new address can both miss the lookup
+        // above. The unique index lets one insert through and answers the
+        // other with a conflict. The account is present either way, so give
+        // the row that won this token instead of failing the second consent.
+        if (!(error instanceof ConnectionStorageError) || error.status !== 409)
+          throw error;
+        const winner = sameAddress(await ownRows());
+        if (!winner) throw error;
+        await update(winner.id);
+      }
     },
     async pauseSchedules(userId, connectionId) {
       await request(
