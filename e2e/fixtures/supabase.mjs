@@ -112,6 +112,7 @@ function newScenario() {
       newSchedule(owner),
       newSchedule(owner, "paused"),
       newSchedule(connected),
+      newSchedule(reconnect),
     ],
     sendLogs: [],
     revokedTokens: [],
@@ -197,6 +198,49 @@ createServer(async (req, res) => {
           (schedule) => schedule.user_id !== scenario.connected.id,
         );
         return reply(200, { user_id: scenario.connected.id });
+      }
+      if (setup === "finished-schedules" && req.method === "POST") {
+        // Two schedules the cron paused because their rules ran out: one
+        // after a fixed number of sends, one on an end date. Both keep the
+        // stale next_send_at the cron leaves behind.
+        const user = scenario.connected;
+        const day = 86400000;
+        const started = new Date(Date.now() - 3 * day);
+        started.setUTCHours(9, 0, 0, 0);
+        const stamp = (date) =>
+          date.toISOString().replace(/[-:]/g, "").replace(".000", "");
+        const lastSend = new Date(started.getTime() + 2 * day);
+        const counted = {
+          ...newSchedule(user, "paused"),
+          subject: "Quarterly reminder",
+          rrule: `DTSTART:${stamp(started)}\nRRULE:FREQ=DAILY;COUNT=3`,
+          next_send_at: lastSend.toISOString(),
+        };
+        const endDay = new Date(Date.now() - day).toISOString().slice(0, 10);
+        const dated = {
+          ...newSchedule(user, "paused"),
+          subject: "Launch countdown",
+          rrule: `DTSTART:${stamp(started)}\nRRULE:FREQ=DAILY;UNTIL=${endDay.replace(/-/g, "")}T235959Z`,
+          next_send_at: lastSend.toISOString(),
+        };
+        scenario.schedules.push(counted, dated);
+        for (let index = 0; index < 3; index += 1) {
+          const at = new Date(started.getTime() + index * day).toISOString();
+          scenario.sendLogs.push({
+            id: randomUUID(),
+            schedule_id: counted.id,
+            user_id: user.id,
+            scheduled_for: at,
+            attempted_at: at,
+            status: "sent",
+            error_code: null,
+          });
+        }
+        return reply(200, {
+          counted: counted.id,
+          dated: dated.id,
+          ended_on: endDay,
+        });
       }
       if (setup === "send-log" && req.method === "POST") {
         const input = JSON.parse(await body(req));

@@ -1,17 +1,50 @@
+/* RecurMail brand tokens. Source: companies/recurmail design pack, design-tokens.css. */
 :root {
+  /* Surfaces */
   --rm-bg: #f3faf6;
-  --rm-grape: #6d3bef;
-  --rm-grape-dark: #5326d1;
+  --rm-bg-2: #e4f3eb;
+  --rm-paper: #ffffff;
+  --rm-line: #d5e8dd;
+
+  /* Text */
   --rm-ink: #1b1530;
   --rm-ink-2: #3f3856;
   --rm-muted: #6e6886;
-  --rm-radius-pill: 999px;
+
+  /* Brand */
+  --rm-grape: #6d3bef;
+  --rm-grape-dark: #5326d1;
+  --rm-grape-soft: #ece4ff;
+  --rm-teal: #0e9f87;
+  --rm-teal-dark: #0b7564;
+  --rm-teal-soft: #d3f2ea;
+  --rm-sun: #ffd84d;
+  --rm-sun-soft: #fff3bf;
+  --rm-sky-soft: #e3ebff;
+
+  /* Semantic */
+  --rm-warn-bg: #fff4e5;
+  --rm-warn-line: #f6d7a8;
+  --rm-warn-ink: #6b4a12;
+  --rm-danger: #e5484d;
+  --rm-danger-ink: #b3262b;
+  --rm-danger-soft: #fde8e9;
+
+  /* Type */
   --rm-font-display:
     var(--font-plus-jakarta-sans), "Plus Jakarta Sans", "DM Sans",
     var(--font-dm-sans), system-ui, sans-serif;
   --rm-font-body:
     var(--font-dm-sans), "DM Sans", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --rm-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Shape */
+  --rm-radius: 18px;
+  --rm-radius-sm: 12px;
+  --rm-radius-pill: 999px;
+  --rm-shadow:
+    0 1px 0 rgba(27, 21, 48, 0.04), 0 10px 30px -12px rgba(27, 21, 48, 0.18);
 }
 
 body {

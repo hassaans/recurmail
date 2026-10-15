@@ -1,109 +1,69 @@
-.page {
-  --rm-bg: #f3faf6;
-  --rm-paper: #fff;
-  --rm-line: #d5e8dd;
-  --rm-ink: #1b1530;
-  --rm-ink-2: #3f3856;
-  --rm-muted: #6e6886;
-  --rm-grape: #6d3bef;
-  --rm-grape-dark: #5326d1;
-  min-height: 100vh;
-  background: var(--rm-bg);
-  color: var(--rm-ink);
-  font: 17px / 1.6 var(--rm-font-body);
+.pageHeader {
+  margin: 0 0 24px;
 }
-.page a {
-  color: var(--rm-grape-dark);
+.pageHeader h1 {
+  margin: 0;
+  font: 800 clamp(30px, 4.5vw, 40px) / 1.1 var(--rm-font-display);
+  letter-spacing: -0.03em;
 }
-.header,
-.main,
-.footer {
-  width: min(100% - 40px, 880px);
-  margin: 0 auto;
-}
-.header {
-  display: flex;
-  justify-content: space-between;
-  padding: 24px 0;
-}
-.header a {
-  font-weight: 700;
-  text-decoration: none;
-}
-.main {
-  padding: 48px 0 80px;
-}
-.main h1,
-.main h2 {
-  font-family: var(--rm-font-display);
-  line-height: 1.1;
-}
-.main h1 {
-  font-size: clamp(38px, 6vw, 58px);
-}
-.main p {
-  color: var(--rm-ink-2);
-}
-.main .eyebrow {
-  color: var(--rm-grape-dark);
-  font-weight: 600;
-}
-.card {
-  padding: 28px;
-  border: 1px solid var(--rm-line);
-  border-radius: 18px;
-  background: var(--rm-paper);
-}
-.card form {
+.stack {
   display: grid;
-  justify-items: start;
-  gap: 12px;
-}
-.card input {
-  width: min(100%, 320px);
-  padding: 12px;
-  border: 1px solid var(--rm-line);
-  border-radius: 12px;
-  font: inherit;
-}
-.card button {
-  padding: 13px 20px;
-  border: 0;
-  border-radius: 999px;
-  background: #a51e31;
-  color: white;
-  font: 600 16px var(--rm-font-body);
-  cursor: pointer;
-}
-.main .error {
-  color: #a51e31;
-}
-.footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
   gap: 20px;
+  max-width: 680px;
+}
+.accountRow {
+  display: flex;
   flex-wrap: wrap;
-  padding: 24px 0 40px;
-  border-top: 1px solid var(--rm-line);
-  color: var(--rm-muted);
-  font-size: 14px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 20px;
 }
-.footer nav {
-  display: flex;
-  gap: 20px;
+.accountRow p {
+  margin: 0;
+  min-width: 0;
 }
-.footer p {
+.email {
+  color: var(--rm-ink);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.accountRow form {
   margin: 0;
 }
-@media (max-width: 520px) {
-  .main {
-    padding-top: 24px;
-  }
-  .card {
-    padding: 20px;
-  }
-  .footer {
-    display: grid;
+.danger {
+  border-color: #f3c1c3;
+}
+.danger h2 {
+  color: var(--rm-danger-ink);
+}
+.form {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  margin: 16px 0 0;
+}
+.form label {
+  color: var(--rm-ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+.form input {
+  width: min(100%, 320px);
+  padding: 11px 14px;
+  border: 1px solid var(--rm-line);
+  border-radius: var(--rm-radius-sm);
+  background: var(--rm-paper);
+  color: var(--rm-ink);
+  font: 16px / 1.4 var(--rm-font-body);
+}
+.form input:focus-visible {
+  border-color: var(--rm-grape);
+}
+.form button {
+  margin-top: 6px;
+}
+@media (max-width: 640px) {
+  .form button {
+    width: 100%;
   }
 }
