@@ -21,7 +21,7 @@ initSentry(Deno.env.get("SENTRY_DSN"));
 Deno.serve(
   createSenderHandler({
     getCronSecret: () => Deno.env.get("SENDER_CRON_SECRET"),
-    execute: async () => {
+    execute: async ({ source }) => {
       const dsn = Deno.env.get("SENTRY_DSN");
       const checkIn = startCronCheckIn(
         dsn,
@@ -44,6 +44,7 @@ Deno.serve(
             resendApiKey: Deno.env.get("RESEND_API_KEY")?.trim() || "",
             reconnectEmailFrom:
               Deno.env.get("RECONNECT_EMAIL_FROM")?.trim() || "",
+            recordIdleRun: source === "daily_keepalive",
           },
         );
         finishCronCheckIn(checkIn, "ok");

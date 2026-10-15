@@ -87,3 +87,29 @@ Deno.test("cron handler fails closed when the secret is not configured", async (
   );
   assert(executions === 0, "missing configuration does not run the sender");
 });
+
+Deno.test("cron handler passes the request source to the sender", async () => {
+  const sources: (string | null)[] = [];
+  const handler = createSenderHandler({
+    getCronSecret: () => "expected-cron-secret",
+    execute: async ({ source }) => {
+      sources.push(source);
+      return { claimed: 0, sent: 0, failed: 0, deferred: 0 };
+    },
+  });
+  const request = (body?: string) =>
+    new Request("http://local/send-due", {
+      method: "POST",
+      headers: { "x-recurmail-cron-secret": "expected-cron-secret" },
+      body,
+    });
+  await handler(request(JSON.stringify({ source: "daily_keepalive" })));
+  await handler(request(JSON.stringify({ source: 7 })));
+  await handler(request("not json"));
+  await handler(request());
+  assert(
+    JSON.stringify(sources) ===
+      JSON.stringify(["daily_keepalive", null, null, null]),
+    `sources were ${JSON.stringify(sources)}`,
+  );
+});

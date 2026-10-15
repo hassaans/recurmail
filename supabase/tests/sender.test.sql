@@ -1,7 +1,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(24);
+select plan(28);
 
 create temporary table sender_metrics_baseline on commit preserve rows as
 select
@@ -29,6 +29,10 @@ select is(has_function_privilege('authenticated', 'public.get_admin_metrics()', 
 select is(has_function_privilege('service_role', 'public.get_admin_metrics()', 'EXECUTE'), true, 'service role can read admin metrics');
 select ok((select count(*) = 2 from cron.job where jobname in ('recurmail-send-due-every-minute', 'recurmail-daily-keepalive')), 'both send-due cron jobs are installed');
 select ok(not exists (select 1 from cron.job where command ilike '%service_role_key%' or command ilike '%Authorization%'), 'cron commands do not store an API key or Authorization header');
+select is((select count(*) from cron.job where jobname in ('recurmail-send-due-every-minute', 'recurmail-daily-keepalive') and command ilike '%timeout_milliseconds := 30000%'), 2::bigint, 'send-due cron calls allow 30 seconds before timing out');
+select is((select count(*) from cron.job where jobname = 'recurmail-send-due-every-minute' and command ilike '%''source'', ''pg_cron''%'), 1::bigint, 'minute cron job still identifies itself as pg_cron');
+select is((select count(*) from cron.job where jobname = 'recurmail-daily-keepalive' and command ilike '%''source'', ''daily_keepalive''%'), 1::bigint, 'daily cron job still identifies itself as the keepalive');
+select is((select count(*) from cron.job where jobname = 'recurmail-prune-cron-history' and schedule = '41 3 * * *' and command ilike '%delete from cron.job_run_details%7 days%'), 1::bigint, 'cron history older than a week is pruned daily');
 select is((select schedule_id from public.claim_due_schedules(1)), '10000000-0000-4000-8000-000000000006'::uuid, 'first claim takes the earliest due schedule');
 select is((select schedule_id from public.claim_due_schedules(1)), '10000000-0000-4000-8000-000000000007'::uuid, 'second claim takes the next due schedule');
 select is((select count(*) from public.claim_due_schedules(1)), 1::bigint, 'third claim gets the remaining schedule');
