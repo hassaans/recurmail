@@ -328,4 +328,58 @@ describe("server Supabase sign-in HTTP flow", () => {
     );
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
   });
+
+  it("signs out from a same-origin post by clearing the session and landing on the homepage", async () => {
+    const f = fixture();
+    const cookie = sessionCookie(
+      {
+        accessToken: "fake-access",
+        refreshToken: "fake-refresh",
+        expiresAt: 10000,
+      },
+      key,
+      origin,
+    ).split(";")[0];
+    const response = await f.handlers.signout(
+      new Request(`${origin}/auth/signout`, {
+        method: "POST",
+        headers: { Cookie: cookie, Origin: origin },
+      }),
+    );
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${origin}/`);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const cleared = response.headers.get("set-cookie") ?? "";
+    expect(cleared).toContain("rm_session=; Path=/;");
+    expect(cleared).toContain("Max-Age=0");
+    expect(cleared).toContain("HttpOnly");
+    expect(cleared).toContain("Secure");
+    expect(f.auth.getUser).not.toHaveBeenCalled();
+  });
+
+  it("refuses to sign out from a cross-site or missing origin without touching the cookie", async () => {
+    const f = fixture();
+    const cookie = sessionCookie(
+      {
+        accessToken: "fake-access",
+        refreshToken: "fake-refresh",
+        expiresAt: 10000,
+      },
+      key,
+      origin,
+    ).split(";")[0];
+    const attempts: Record<string, string>[] = [
+      { Cookie: cookie, Origin: "https://attacker.test" },
+      { Cookie: cookie },
+    ];
+    for (const headers of attempts) {
+      const response = await f.handlers.signout(
+        new Request(`${origin}/auth/signout`, { method: "POST", headers }),
+      );
+      expect(response.status).toBe(403);
+      expect(await response.text()).toBe("Request origin is not allowed");
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect(response.headers.get("location")).toBeNull();
+    }
+  });
 });

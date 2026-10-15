@@ -184,6 +184,9 @@ test("weekly Monday editor saves and dashboard shows the next Monday", async ({
   ).toHaveCount(5);
   await page.getByRole("button", { name: "Save schedule" }).click();
   await expect(page).toHaveURL(/\/dashboard\?saved=1/);
+  await expect(
+    page.getByRole("status").filter({ hasText: "Schedule saved." }),
+  ).toBeVisible();
   await expect(page.getByText("Monday check-in")).toBeVisible();
   const saved = await browserRequest<{ schedules: ScheduleRow[] }>(
     page,
@@ -192,7 +195,11 @@ test("weekly Monday editor saves and dashboard shows the next Monday", async ({
   expect(saved.body.schedules).toHaveLength(1);
   const nextMonday = new Date(saved.body.schedules[0].next_send_at);
   expect(nextMonday.getUTCDay()).toBe(1);
-  await expect(page.getByText(/Next send.*Monday/i)).toBeVisible();
+  const card = page
+    .getByRole("listitem")
+    .filter({ hasText: "Monday check-in" });
+  await expect(card).toContainText("Next send");
+  await expect(card.locator("time")).toHaveText(/^Mon, .* at 9:15 AM /);
 });
 
 test("schedule editor fits a 375px viewport without horizontal overflow", async ({
@@ -239,7 +246,9 @@ test("dashboard summarizes schedules and pause-all pauses every active schedule"
 
   await page.reload();
   await expect(page.getByText("First reminder")).toBeVisible();
-  await expect(page.getByText("2 recipients")).toBeVisible();
+  await expect(
+    page.getByText("one@example.test and two@example.test"),
+  ).toBeVisible();
   await expect(page.getByText("Every day")).toBeVisible();
   await expect(page.getByText("Every week on Monday and Friday")).toBeVisible();
   await expect(page.getByText("Active", { exact: true })).toHaveCount(2);
@@ -256,6 +265,16 @@ test("dashboard summarizes schedules and pause-all pauses every active schedule"
   );
 
   await page.getByRole("button", { name: "Pause all schedules" }).click();
+  const confirmPauseAll = page.getByRole("dialog", {
+    name: "Pause all 2 schedules?",
+  });
+  await expect(confirmPauseAll).toContainText(
+    "Nothing sends until you resume each one.",
+  );
+  await confirmPauseAll
+    .getByRole("button", { name: "Pause all", exact: true })
+    .click();
+  await expect(confirmPauseAll).toHaveCount(0);
   await expect(page.getByText("Paused", { exact: true })).toHaveCount(2);
   const firstRow = page
     .getByRole("listitem")
@@ -274,7 +293,13 @@ test("dashboard summarizes schedules and pause-all pauses every active schedule"
   const deleteButton = secondRow.getByRole("button", { name: "Delete" });
   await expect(deleteButton).toBeEnabled();
   await deleteButton.click();
+  const confirmDelete = page.getByRole("dialog", {
+    name: "Delete this schedule?",
+  });
+  await expect(confirmDelete).toContainText("Second reminder");
+  await confirmDelete.getByRole("button", { name: "Delete schedule" }).click();
   await expect(secondRow).toHaveCount(0);
+  await expect(confirmDelete).toHaveCount(0);
 });
 
 test("schedule history shows sent and failed entries with plain-language reasons", async ({

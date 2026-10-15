@@ -24,7 +24,7 @@ test("account settings delete the signed-in user's account and related rows", as
   await expect(
     page.getByRole("heading", { name: "Delete account" }),
   ).toBeVisible();
-  await page.getByLabel("Confirmation").fill("delete");
+  await page.getByLabel("Type delete to confirm").fill("delete");
   await page.getByRole("button", { name: "Delete account" }).click();
   await expect(page).toHaveURL(/\/?account=deleted$/);
 

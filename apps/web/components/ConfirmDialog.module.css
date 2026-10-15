@@ -1,0 +1,36 @@
+.dialog {
+  width: min(100% - 32px, 440px);
+  padding: 28px;
+  border: 0;
+  border-radius: var(--rm-radius);
+  background: var(--rm-paper);
+  color: var(--rm-ink);
+  box-shadow: var(--rm-shadow);
+  font: 16px / 1.5 var(--rm-font-body);
+}
+.dialog::backdrop {
+  background: rgba(27, 21, 48, 0.45);
+}
+.dialog h2 {
+  margin: 0 0 10px;
+  font: 800 22px / 1.2 var(--rm-font-display);
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+.dialog p {
+  margin: 0 0 22px;
+  color: var(--rm-ink-2);
+}
+.dialog .error {
+  margin: -6px 0 18px;
+  font-size: 14px;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.actions form {
+  margin: 0;
+}
