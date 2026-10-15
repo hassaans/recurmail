@@ -6,8 +6,10 @@
 
 /**
  * Legacy IANA ids the runtime may list instead of the canonical name, mapped
- * to the canonical id. Country and city tables use canonical ids, so a runtime
- * that lists Asia/Calcutta still matches "India" and "Mumbai" through this map.
+ * to the canonical id. The picker lists, shows and saves the canonical id and
+ * maps a saved legacy id when it loads; the API accepts either. Only renamed
+ * ids belong here, never links that merge two places into one zone, because
+ * the canonical id is what the user sees.
  */
 export const LEGACY_ZONE_IDS: Readonly<Record<string, string>> = {
   "America/Buenos_Aires": "America/Argentina/Buenos_Aires",
@@ -24,7 +26,6 @@ export const LEGACY_ZONE_IDS: Readonly<Record<string, string>> = {
   "Asia/Saigon": "Asia/Ho_Chi_Minh",
   "Atlantic/Faeroe": "Atlantic/Faroe",
   "Europe/Kiev": "Europe/Kyiv",
-  "Indian/Cocos": "Asia/Yangon",
   "Pacific/Enderbury": "Pacific/Kanton",
 };
 

@@ -358,12 +358,18 @@ function sortOptions(options: TimeZoneOption[]): TimeZoneOption[] {
   );
 }
 
+/**
+ * Every zone the runtime lists, under its canonical IANA id. Chromium and Node
+ * still list legacy names such as Asia/Calcutta, Asia/Saigon and Europe/Kiev,
+ * so each id is mapped and the list deduplicated before any option is built.
+ * Ids the runtime cannot format are dropped.
+ */
 function supportedTimeZoneIds(): string[] {
   const intl = Intl as unknown as {
     supportedValuesOf?: (key: string) => string[];
   };
   const ids = intl.supportedValuesOf ? intl.supportedValuesOf("timeZone") : [];
-  const set = new Set(ids.filter(isKnownTimeZone));
+  const set = new Set(ids.map(canonicalTimeZoneId).filter(isKnownTimeZone));
   set.add("UTC");
   return [...set];
 }

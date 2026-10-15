@@ -4,6 +4,7 @@ import AppShell from "../../../../components/AppShell";
 import controls from "../../../../components/controls.module.css";
 import ScheduleHistory from "../../../../components/ScheduleHistory";
 import { configuredRuntime } from "../../../../lib/runtime";
+import { finishedInfo } from "../../../../lib/schedule-finished";
 import type { ScheduleRow, SendHistoryRow } from "../../../../lib/schedules";
 
 export const metadata = {
@@ -60,6 +61,16 @@ export default async function ScheduleHistoryPage({
     );
   }
 
+  // The history is already loaded, so the sent count for a finished COUNT
+  // schedule comes for free.
+  const finished = schedule
+    ? finishedInfo(
+        schedule,
+        new Date(),
+        history.filter((entry) => entry.status === "sent").length,
+      )
+    : null;
+
   return (
     <AppShell email={state.user.email} active="schedules">
       {schedule ? (
@@ -67,6 +78,7 @@ export default async function ScheduleHistoryPage({
           schedule={schedule}
           history={history}
           connectionStatus={connectionStatus}
+          finished={finished}
         />
       ) : (
         <p className={controls.error} role="alert">
