@@ -279,7 +279,7 @@ test("signed-in Connect Gmail exchanges PKCE, encrypts the row, then Disconnect 
     .getByRole("button", { name: "Connect Gmail", exact: true })
     .click();
   await expect(page).toHaveURL(
-    `http://127.0.0.1:3100/dashboard?gmail=connected&email=${encodeURIComponent(scenario.owner.email)}`,
+    `${appOrigin}/dashboard?gmail=connected&email=${encodeURIComponent(scenario.owner.email)}`,
   );
   await expect(
     page.getByRole("status").filter({ hasText: "Connected " }),
@@ -371,7 +371,7 @@ test("signed-in Connect Gmail exchanges PKCE, encrypts the row, then Disconnect 
     .getByRole("button", { name: "Disconnect", exact: true })
     .click();
   await expect(page).toHaveURL(
-    `http://127.0.0.1:3100/dashboard?gmail=disconnected&email=${encodeURIComponent(scenario.owner.email)}`,
+    `${appOrigin}/dashboard?gmail=disconnected&email=${encodeURIComponent(scenario.owner.email)}`,
   );
   await expect(
     page.getByRole("status").filter({ hasText: "Disconnected " }),
