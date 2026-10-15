@@ -1,3 +1,7 @@
 packages:
   - apps/*
   - packages/*
+
+overrides:
+  # Next.js pins postcss 8.4.31, which has open security advisories.
+  postcss: ^8.5.30
