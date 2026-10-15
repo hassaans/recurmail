@@ -15,33 +15,67 @@ export interface GoogleProvider {
     verifier: string,
   ): Promise<string>;
   revoke(refreshToken: string): Promise<void>;
+  /** Exchange a stored refresh token for a short-lived access token. */
+  refreshAccessToken(refreshToken: string): Promise<string>;
+  /** Send a prebuilt RFC 2822 message (base64url `raw`) as the signed-in Gmail user. */
+  sendMessage(accessToken: string, raw: string): Promise<void>;
+}
+
+/** Google refused the refresh grant; `invalid_grant` means the user must reconnect. */
+export class GoogleTokenError extends Error {
+  constructor(readonly code: string) {
+    super(`Google token request failed: ${code}`);
+  }
+}
+
+/** Gmail rejected or failed the send; the status is the only detail kept. */
+export class GmailSendError extends Error {
+  constructor(readonly status: number) {
+    super(`Gmail send failed with status ${status}`);
+  }
+}
+
+// Browser tests may use a local provider; deployed builds always use Google.
+function loopbackOrigin(value: string, message: string): string {
+  let endpoint: URL;
+  try {
+    endpoint = new URL(value);
+  } catch {
+    throw new Error(message);
+  }
+  if (
+    endpoint.protocol !== "http:" ||
+    !["127.0.0.1", "[::1]"].includes(endpoint.hostname) ||
+    endpoint.origin !== value
+  )
+    throw new Error(message);
+  return endpoint.origin;
 }
 
 export function createGoogleProvider(config: {
   clientId: string;
   clientSecret: string;
   testOAuthOrigin?: string;
+  testGmailOrigin?: string;
   fetcher?: typeof fetch;
 }): GoogleProvider {
   const fetcher = config.fetcher ?? fetch;
   let authorizationEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
   let tokenOrigin = "https://oauth2.googleapis.com";
-  // Browser tests may use a local provider; deployed builds always use Google.
+  let gmailOrigin = "https://gmail.googleapis.com";
   if (config.testOAuthOrigin && process.env.NODE_ENV !== "production") {
-    let endpoint: URL;
-    try {
-      endpoint = new URL(config.testOAuthOrigin);
-    } catch {
-      throw new Error("Test OAuth endpoint must be a loopback origin");
-    }
-    if (
-      endpoint.protocol !== "http:" ||
-      !["127.0.0.1", "[::1]"].includes(endpoint.hostname) ||
-      endpoint.origin !== config.testOAuthOrigin
-    )
-      throw new Error("Test OAuth endpoint must be a loopback origin");
-    authorizationEndpoint = `${endpoint.origin}/o/oauth2/v2/auth`;
-    tokenOrigin = endpoint.origin;
+    const origin = loopbackOrigin(
+      config.testOAuthOrigin,
+      "Test OAuth endpoint must be a loopback origin",
+    );
+    authorizationEndpoint = `${origin}/o/oauth2/v2/auth`;
+    tokenOrigin = origin;
+  }
+  if (config.testGmailOrigin && process.env.NODE_ENV !== "production") {
+    gmailOrigin = loopbackOrigin(
+      config.testGmailOrigin,
+      "Test Gmail endpoint must be a loopback origin",
+    );
   }
   return {
     authorizationUrl({ redirectUri, state, email, challenge }) {
@@ -97,6 +131,42 @@ export function createGoogleProvider(config: {
         if (body.error === "invalid_token") return;
       }
       throw new Error("Gmail revocation failed");
+    },
+    async refreshAccessToken(refreshToken) {
+      const response = await fetcher(`${tokenOrigin}/token`, {
+        method: "POST",
+        body: new URLSearchParams({
+          client_id: config.clientId,
+          client_secret: config.clientSecret,
+          refresh_token: refreshToken,
+          grant_type: "refresh_token",
+        }),
+        cache: "no-store",
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new GoogleTokenError(
+          body?.error === "invalid_grant" ? "invalid_grant" : "token_failed",
+        );
+      }
+      if (typeof body.access_token !== "string" || !body.access_token)
+        throw new GoogleTokenError("token_failed");
+      return body.access_token;
+    },
+    async sendMessage(accessToken, raw) {
+      const response = await fetcher(
+        `${gmailOrigin}/gmail/v1/users/me/messages/send`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ raw }),
+          cache: "no-store",
+        },
+      );
+      if (!response.ok) throw new GmailSendError(response.status);
     },
   };
 }

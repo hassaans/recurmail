@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { expect, type Page } from "@playwright/test";
 import {
+  appOrigin,
   fakeSupabaseUrl,
   test,
   testEncryptionKey,
@@ -68,7 +69,7 @@ test("the sign-in button's first redirect is Google with an app-origin callback"
   expect(authorization.pathname).toBe("/o/oauth2/v2/auth");
   expect(
     new URL(authorization.searchParams.get("redirect_uri") ?? "").origin,
-  ).toBe("http://127.0.0.1:3100");
+  ).toBe(appOrigin);
 });
 
 test("Google sign-in callback with fake Supabase leads to Connect Gmail without provider tokens in the page", async ({
@@ -217,7 +218,7 @@ test("an expired Supabase session refreshes through the server and a forged sess
     page.getByText(`Signed in as ${scenario.owner.email}`),
   ).toBeVisible();
   await context.addCookies([
-    { name: "rm_session", value: "forged", url: "http://127.0.0.1:3100" },
+    { name: "rm_session", value: "forged", url: appOrigin },
   ]);
   await page.goto("/dashboard");
   await expect(
@@ -393,6 +394,6 @@ test("Gmail mutation routes reject GET and cross-origin requests", async ({
     { maxRedirects: 0 },
   );
   expect(callback.headers().location).toBe(
-    "http://127.0.0.1:3100/dashboard?auth=required",
+    `${appOrigin}/dashboard?auth=required`,
   );
 });
