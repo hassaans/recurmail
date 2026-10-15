@@ -8,6 +8,7 @@ import {
   isKnownTimeZone,
   isValidAddress,
   localTimeFromRule,
+  normalizeLink,
   ordinal,
   repeatFromRule,
   scheduleDefaults,
@@ -385,6 +386,36 @@ describe("schedule summary", () => {
         at,
       }),
     ).toBe("Custom rule at 8:00 AM, Pakistan Time");
+  });
+});
+
+describe("link normalization", () => {
+  it("keeps http, https and mailto links", () => {
+    expect(normalizeLink("https://example.com/path?x=1")).toBe(
+      "https://example.com/path?x=1",
+    );
+    expect(normalizeLink("http://example.com")).toBe("http://example.com/");
+    expect(normalizeLink("mailto:ayesha@example.test")).toBe(
+      "mailto:ayesha@example.test",
+    );
+  });
+
+  it("adds https to a bare domain", () => {
+    expect(normalizeLink("example.com/report")).toBe(
+      "https://example.com/report",
+    );
+    expect(normalizeLink("  docs.example.com  ")).toBe(
+      "https://docs.example.com/",
+    );
+  });
+
+  it("rejects empty input, other schemes and junk", () => {
+    expect(normalizeLink("")).toBeNull();
+    expect(normalizeLink("   ")).toBeNull();
+    expect(normalizeLink("javascript:alert(1)")).toBeNull();
+    expect(normalizeLink("data:text/html,hi")).toBeNull();
+    expect(normalizeLink("ftp://example.com/file")).toBeNull();
+    expect(normalizeLink("not a url")).toBeNull();
   });
 });
 
