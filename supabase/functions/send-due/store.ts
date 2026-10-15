@@ -54,6 +54,8 @@ export function createStore(
   }
   return {
     failureMetrics,
+    reportFailureRate: (rate) =>
+      captureFailureRate(rate, Deno.env.get("SENTRY_DSN")),
     claim: (limit) => rpc("claim_due_schedules", { p_limit: limit }),
     claimReconnectNotices: (limit) =>
       rpc("claim_reconnect_email_outbox", { p_limit: limit }),
@@ -121,12 +123,6 @@ export function createStore(
       if (!response.ok) {
         throw new Error(
           `Supabase heartbeat insert failed (${response.status})`,
-        );
-      }
-      if (input.failureRateLastHour !== null) {
-        captureFailureRate(
-          input.failureRateLastHour,
-          Deno.env.get("SENTRY_DSN"),
         );
       }
     },

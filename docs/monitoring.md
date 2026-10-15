@@ -6,6 +6,8 @@ Set `SENTRY_DSN` in the web and `send-due` environments. The browser SDK receive
 
 Set `SENTRY_CRON_MONITOR_SLUG=send-due-every-minute` in `send-due`. Each invocation reports its start and completion to Sentry. It also sends a `send_failure_rate_last_hour` gauge from `send_log` rows marked `sent` or `failed` in the trailing hour. The sender heartbeat stores that rate and its failed and attempted counts. A failed query leaves those fields null.
 
+A run writes a `sender_heartbeats` row only when it claimed a schedule or sent a reconnect notice. The daily keepalive run always writes one, so the project gets at least one database write a day. The gauge is reported on every run. The pg_cron calls allow 30 seconds before pg_net records a timeout, and a daily job deletes `cron.job_run_details` rows older than 7 days.
+
 ## Cron monitor
 
 The pg_cron jobs require only these Vault secrets:

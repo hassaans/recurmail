@@ -52,6 +52,7 @@ export type SenderStore = {
     attempted: number;
     rate: number;
   }>;
+  reportFailureRate?(rate: number): void;
   heartbeat(input: {
     id: string;
     startedAt: string;
@@ -79,6 +80,9 @@ export type SenderConfig = {
   resendApiKey?: string;
   reconnectEmailFrom?: string;
   resendEndpoint?: string;
+  // Write a heartbeat row even when the run found nothing to do. The daily
+  // keepalive sets this so the project still gets one database write a day.
+  recordIdleRun?: boolean;
 };
 
 export async function runSender(
@@ -355,20 +359,28 @@ export async function runSender(
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    await store.heartbeat({
-      id: crypto.randomUUID(),
-      startedAt: startedAt.toISOString(),
-      finishedAt: finishedAt.toISOString(),
-      claimed: schedules.length + recovered.length,
-      sent,
-      failed,
-      deferred,
-      noticesSent,
-      noticesFailed,
-      failureRateLastHour: failureMetrics?.rate ?? null,
-      failedLastHour: failureMetrics?.failed ?? null,
-      attemptedLastHour: failureMetrics?.attempted ?? null,
-    });
+    if (typeof failureMetrics?.rate === "number")
+      store.reportFailureRate?.(failureMetrics.rate);
+    const idle =
+      schedules.length + recovered.length === 0 &&
+      noticesSent === 0 &&
+      noticesFailed === 0;
+    // Runs that claimed nothing and sent no notices leave no row behind.
+    if (!idle || config.recordIdleRun)
+      await store.heartbeat({
+        id: crypto.randomUUID(),
+        startedAt: startedAt.toISOString(),
+        finishedAt: finishedAt.toISOString(),
+        claimed: schedules.length + recovered.length,
+        sent,
+        failed,
+        deferred,
+        noticesSent,
+        noticesFailed,
+        failureRateLastHour: failureMetrics?.rate ?? null,
+        failedLastHour: failureMetrics?.failed ?? null,
+        attemptedLastHour: failureMetrics?.attempted ?? null,
+      });
   }
 }
 
