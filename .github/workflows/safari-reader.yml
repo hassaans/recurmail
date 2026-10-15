@@ -1,0 +1,61 @@
+name: Safari Reader
+
+# iOS Safari can open pages in Reader automatically. The homepage is a product
+# page, not an article, so Reader must not be available on it. This runs
+# Safari's own Reader detection against a production build.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "packages/**"
+      - ".github/safari-reader/**"
+      - ".github/workflows/safari-reader.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reader:
+    name: Homepage is not offered in Safari Reader
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.18.3
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the web app
+        run: pnpm --filter @recurmail/web build
+      - name: Start the web app
+        run: |
+          (cd apps/web && nohup pnpm exec next start -p 3000 > /tmp/next.log 2>&1 &)
+          for i in $(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:3000/ && exit 0; sleep 1; done
+          cat /tmp/next.log; exit 1
+      - name: Extract Safari's Reader detection script
+        run: |
+          sw_vers -productVersion; defaults read /Applications/Safari.app/Contents/Info CFBundleShortVersionString
+          for f in /System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_*; do
+            case "$f" in *.map|*.atlas|*.symbols) continue;; esac
+            if LC_ALL=C grep -qa "__InjectedScript_ReaderArticleFinder" "$f"; then echo "$f"; fi
+          done > reader-sources.txt
+          test -s reader-sources.txt
+          sudo python3 .github/safari-reader/extract.py reader-sources.txt "$RUNNER_TEMP/reader.js"
+          sudo chmod a+r "$RUNNER_TEMP/reader.js"
+      - run: sudo safaridriver --enable
+      - run: python3 -m venv "$RUNNER_TEMP/venv" && "$RUNNER_TEMP/venv/bin/pip" install --quiet selenium==4.27.1
+      - name: Check Reader availability
+        # The guide is a real article and must stay readable: it proves the
+        # detector works, so a broken extraction cannot pass the homepage.
+        run: >
+          "$RUNNER_TEMP/venv/bin/python" .github/safari-reader/check.py "$RUNNER_TEMP/reader.js" http://127.0.0.1:3000
+          /=no /guides/recurring-email-gmail=yes
