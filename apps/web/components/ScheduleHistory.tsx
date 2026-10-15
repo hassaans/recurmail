@@ -1,4 +1,8 @@
-import { type ConnectionStatus, scheduleState } from "../lib/schedule-state";
+import {
+  type ConnectionStatus,
+  type FinishedInfo,
+  scheduleState,
+} from "../lib/schedule-state";
 import { recipientSummary } from "../lib/schedule-summary";
 import {
   describeCadence,
@@ -15,6 +19,8 @@ type ScheduleHistoryProps = {
   schedule: ScheduleRow;
   history: SendHistoryRow[];
   connectionStatus: ConnectionStatus;
+  /** Set when the paused schedule's rule has run out; derived by the page. */
+  finished?: FinishedInfo | null;
 };
 
 const pillClass = {
@@ -54,8 +60,14 @@ export default function ScheduleHistory({
   schedule,
   history,
   connectionStatus,
+  finished = null,
 }: ScheduleHistoryProps) {
-  const state = scheduleState(schedule.status, connectionStatus);
+  const isFinished = schedule.status === "paused" && finished !== null;
+  const state = scheduleState(
+    schedule.status,
+    connectionStatus,
+    isFinished ? finished : null,
+  );
   const recipients = recipientSummary([
     ...schedule.to,
     ...schedule.cc,
@@ -83,17 +95,19 @@ export default function ScheduleHistory({
           <div className={styles.headerActions}>
             {canEdit ? (
               <a
-                className={controls.secondary}
+                className={isFinished ? controls.primary : controls.secondary}
                 href={`/schedules/${encodeURIComponent(schedule.id)}/edit`}
               >
-                Edit schedule
+                {isFinished ? "Edit to restart" : "Edit schedule"}
               </a>
             ) : null}
-            <SchedulePauseButton
-              scheduleId={schedule.id}
-              subject={schedule.subject}
-              status={schedule.status}
-            />
+            {isFinished ? null : (
+              <SchedulePauseButton
+                scheduleId={schedule.id}
+                subject={schedule.subject}
+                status={schedule.status}
+              />
+            )}
           </div>
         </div>
         <dl className={styles.facts}>

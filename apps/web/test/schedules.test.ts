@@ -646,6 +646,136 @@ describe("US-005 schedule HTTP handlers with injected persistence", () => {
     expect(Date.parse(f.rows[0].next_send_at)).toBeGreaterThan(instant);
   });
 
+  it("keeps accepting legacy time zone ids from the API", async () => {
+    const f = fixture([row()]);
+    const created = await f.handlers.create(
+      request("/api/schedules", "POST", input({ timezone: "Asia/Calcutta" })),
+    );
+    expect(created.status).toBe(201);
+    expect((await created.json()).schedule).toMatchObject({
+      timezone: "Asia/Calcutta",
+      next_send_at: "2026-07-02T03:30:00.000Z",
+    });
+    const patched = await f.handlers.patch(
+      request("/api/schedules/schedule-1", "PATCH", {
+        timezone: "Europe/Kiev",
+      }),
+      "schedule-1",
+    );
+    expect(patched.status).toBe(200);
+    expect((await patched.json()).schedule).toMatchObject({
+      timezone: "Europe/Kiev",
+      next_send_at: "2026-07-02T06:00:00.000Z",
+    });
+  });
+
+  it("restarts a finished schedule when a patch gives its rule a future send", async () => {
+    const finished = row({
+      status: "paused",
+      rrule: "DTSTART:20260601T090000\nRRULE:FREQ=DAILY;COUNT=3",
+      next_send_at: "2026-06-03T09:00:00.000Z",
+    });
+    const f = fixture([finished]);
+    const response = await f.handlers.patch(
+      request("/api/schedules/schedule-1", "PATCH", {
+        rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;BYSECOND=0",
+      }),
+      finished.id,
+    );
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.schedule).toMatchObject({
+      status: "active",
+      rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;BYSECOND=0",
+      next_send_at: "2026-07-02T09:00:00.000Z",
+    });
+    expect(f.store.update).toHaveBeenCalledWith(
+      owner.id,
+      finished.id,
+      expect.objectContaining({ status: "active" }),
+      accessToken,
+    );
+    expect(f.rows[0].status).toBe("active");
+  });
+
+  it("restarts a finished UNTIL schedule when only its time zone changes to one with sends left", async () => {
+    const finished = row({
+      status: "paused",
+      rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;BYSECOND=0;UNTIL=20260701T235959",
+      timezone: "Pacific/Auckland",
+      next_send_at: "2026-06-30T21:00:00.000Z",
+    });
+    const f = fixture([finished]);
+    f.now.mockReturnValue(Date.parse("2026-07-01T14:00:00Z"));
+    const response = await f.handlers.patch(
+      request("/api/schedules/schedule-1", "PATCH", {
+        timezone: "America/Los_Angeles",
+      }),
+      finished.id,
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()).schedule).toMatchObject({
+      status: "active",
+      timezone: "America/Los_Angeles",
+      next_send_at: "2026-07-01T16:00:00.000Z",
+    });
+  });
+
+  it("keeps a schedule the user paused on pause after a rule change", async () => {
+    const paused = row({ status: "paused" });
+    const f = fixture([paused]);
+    const response = await f.handlers.patch(
+      request("/api/schedules/schedule-1", "PATCH", {
+        rrule: "FREQ=DAILY;BYHOUR=10;BYMINUTE=0;BYSECOND=0",
+      }),
+      paused.id,
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()).schedule).toMatchObject({
+      status: "paused",
+      next_send_at: "2026-07-01T10:00:00.000Z",
+    });
+    expect(f.store.update.mock.calls[0][2]).not.toHaveProperty("status");
+  });
+
+  it("leaves a finished schedule finished when only its subject changes", async () => {
+    const finished = row({
+      status: "paused",
+      rrule: "DTSTART:20260601T090000\nRRULE:FREQ=DAILY;COUNT=3",
+      next_send_at: "2026-06-03T09:00:00.000Z",
+    });
+    const f = fixture([finished]);
+    const response = await f.handlers.patch(
+      request("/api/schedules/schedule-1", "PATCH", { subject: "Renamed" }),
+      finished.id,
+    );
+    expect(response.status).toBe(200);
+    expect(f.rows[0]).toMatchObject({
+      subject: "Renamed",
+      status: "paused",
+      next_send_at: "2026-06-03T09:00:00.000Z",
+    });
+    expect(f.store.update.mock.calls[0][2]).not.toHaveProperty("status");
+    expect(f.store.update.mock.calls[0][2]).not.toHaveProperty("next_send_at");
+  });
+
+  it("still rejects a patch whose new rule has no future send", async () => {
+    const finished = row({
+      status: "paused",
+      rrule: "DTSTART:20260601T090000\nRRULE:FREQ=DAILY;COUNT=3",
+      next_send_at: "2026-06-03T09:00:00.000Z",
+    });
+    const f = fixture([finished]);
+    const response = await f.handlers.patch(
+      request("/api/schedules/schedule-1", "PATCH", {
+        rrule: "DTSTART:20260601T090000\nRRULE:FREQ=DAILY;COUNT=5",
+      }),
+      finished.id,
+    );
+    expect(response.status).toBe(400);
+    expect(f.store.update).not.toHaveBeenCalled();
+  });
+
   it("deletes only the addressed owner's schedule", async () => {
     const foreign = row({ id: "foreign", user_id: "other" });
     const f = fixture([row(), foreign]);

@@ -8,6 +8,7 @@ import type { PublicConnection } from "./connections";
 import type { Authenticate, Identity } from "./gmail-flow";
 import { sameOrigin } from "./http";
 import { sanitizeScheduleHtml } from "./sanitize";
+import { isFinishedSchedule } from "./schedule-finished";
 import { ScheduleStorageError } from "./schedule-store";
 
 export interface ScheduleInput {
@@ -417,14 +418,19 @@ export function createScheduleHandlers(config: {
         );
         const at = new Date(now());
         const normalized = normalize({ ...original, ...provided }, at);
+        const ruleChanged =
+          fields.includes("rrule") || fields.includes("timezone");
+        // A finished schedule was paused by the cron because its rule ran
+        // out, so a new rule with a future send starts it again. A schedule
+        // the user paused stays paused.
+        const restart = ruleChanged && isFinishedSchedule(original, at);
         const changes: ScheduleChanges = {
           ...Object.fromEntries(
             fields.map((field) => [field, normalized[field]]),
           ),
           updated_at: at.toISOString(),
-          ...(fields.includes("rrule") || fields.includes("timezone")
-            ? { next_send_at: nextSend(normalized, at) }
-            : {}),
+          ...(ruleChanged ? { next_send_at: nextSend(normalized, at) } : {}),
+          ...(restart ? { status: "active" as const } : {}),
         };
         return forecast(identity, await update(identity, id, changes), at);
       }),
