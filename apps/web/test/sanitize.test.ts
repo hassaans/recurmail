@@ -19,4 +19,20 @@ describe("schedule HTML sanitization", () => {
       sanitizeScheduleHtml('<a href="javascript:alert(1)">click</a>'),
     ).toBe("<a>click</a>");
   });
+
+  it("keeps editor bold and italic as strong and em", () => {
+    expect(
+      sanitizeScheduleHtml('Plain <b style="x">bold</b> and <i>italic</i>'),
+    ).toBe("Plain <strong>bold</strong> and <em>italic</em>");
+  });
+
+  it("keeps the line breaks the editor writes as divs", () => {
+    expect(
+      sanitizeScheduleHtml(
+        'Line one<div>Line two <i>here</i></div><div><br></div><div class="x">Line four</div>',
+      ),
+    ).toBe(
+      "Line one<p>Line two <em>here</em></p><p><br /></p><p>Line four</p>",
+    );
+  });
 });

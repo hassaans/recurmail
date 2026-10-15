@@ -1402,3 +1402,40 @@ test("pausing persists across reads and excludes the schedule from active result
   });
   expect(probe.body.warning).toBeUndefined();
 });
+
+test("bold, italic and new lines typed in the editor survive saving and reopening", async ({
+  page,
+}) => {
+  await page.goto("/schedules/new");
+  await page.getByRole("textbox", { name: "To" }).fill("format@example.test");
+  await page.getByLabel("Subject").fill("Formatted note");
+  // Real typing and shortcuts, so the browser writes its own <b>, <i> and <div>.
+  await page.getByRole("textbox", { name: "Message" }).click();
+  await page.keyboard.type("Line one ");
+  await page.keyboard.press("ControlOrMeta+b");
+  await page.keyboard.type("bold");
+  await page.keyboard.press("ControlOrMeta+b");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Line two ");
+  await page.keyboard.press("ControlOrMeta+i");
+  await page.keyboard.type("italic");
+  await page.getByRole("button", { name: "Save schedule" }).click();
+  await expect(page).toHaveURL(/\/dashboard\?saved=1/);
+
+  const saved = await browserRequest<{ schedules: ScheduleRow[] }>(
+    page,
+    "/api/schedules",
+  );
+  const html = saved.body.schedules[0].body_html ?? "";
+  expect(html).toContain("<strong>bold</strong>");
+  expect(html).toContain("<em>italic</em>");
+  expect(html).toMatch(/Line one <strong>bold<\/strong><p>Line two /);
+
+  await page.goto(`/schedules/${saved.body.schedules[0].id}/edit`);
+  const message = page.getByRole("textbox", { name: "Message" });
+  await expect(message.locator("strong")).toHaveText("bold");
+  await expect(message.locator("em")).toHaveText("italic");
+  expect(await message.innerText()).toMatch(
+    /^Line one bold\n+Line two italic$/,
+  );
+});

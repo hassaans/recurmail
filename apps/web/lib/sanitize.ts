@@ -6,6 +6,9 @@ const options: sanitizeHtml.IOptions = {
   allowedSchemes: ["http", "https", "mailto"],
   allowProtocolRelative: false,
   disallowedTagsMode: "discard",
+  // Browsers' rich-text editing writes <b>, <i> and a <div> per line; keep that
+  // formatting as the allowed equivalents instead of discarding it.
+  transformTags: { b: "strong", i: "em", div: "p" },
 };
 
 export function sanitizeScheduleHtml(value: string): string {
