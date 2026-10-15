@@ -707,6 +707,39 @@ Deno.test("stale claims are failed and advanced without another Gmail send", asy
   equal(store.heartbeats.length, 1, "recovery writes a heartbeat");
 });
 
+Deno.test("an idle run writes no heartbeat row but still reports the failure rate", async () => {
+  const store = recordingStore([]);
+  const rates: number[] = [];
+  store.reportFailureRate = (rate) => rates.push(rate);
+  const result = await runSender(store, {
+    key: "unused",
+    clientId: "fake",
+    clientSecret: "fake",
+    appUrl: "https://recurmail.example",
+  });
+  equal(result.claimed, 0, "nothing claimed");
+  equal(store.heartbeats.length, 0, "no heartbeat row for an idle run");
+  equal(rates.length, 1, "failure rate is still reported");
+  equal(rates[0], 0.1, "reported rate comes from the metrics query");
+});
+
+Deno.test("the daily keepalive writes a heartbeat row even when idle", async () => {
+  const store = recordingStore([]);
+  await runSender(store, {
+    key: "unused",
+    clientId: "fake",
+    clientSecret: "fake",
+    appUrl: "https://recurmail.example",
+    recordIdleRun: true,
+  });
+  equal(store.heartbeats.length, 1, "keepalive heartbeat row");
+  equal(
+    (store.heartbeats[0] as { claimed: number }).claimed,
+    0,
+    "keepalive row records an idle run",
+  );
+});
+
 Deno.test("one completion store failure does not stop later schedules or heartbeat", async () => {
   const { envelope, key } = await nodeEncryptedToken();
   const schedules = [
