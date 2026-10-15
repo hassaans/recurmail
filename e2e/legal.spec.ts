@@ -104,7 +104,7 @@ test("legal pages are linked from the homepage, guides and app footer", async ({
   ).toBeVisible();
 });
 
-test("legal pages name the operator and both contact addresses, and every footer links to support", async ({
+test("legal pages name the operator and the support, privacy and legal addresses, and every footer links to support", async ({
   page,
 }) => {
   for (const path of ["/privacy", "/terms"]) {
@@ -118,9 +118,12 @@ test("legal pages name the operator and both contact addresses, and every footer
     await expect(
       main.getByRole("link", { name: "support@recurmail.com" }),
     ).toHaveAttribute("href", "mailto:support@recurmail.com");
-    await expect(
-      main.getByRole("link", { name: "hassaan@recurmail.com" }),
-    ).toHaveAttribute("href", "mailto:hassaan@recurmail.com");
+    for (const address of ["privacy@recurmail.com", "legal@recurmail.com"])
+      await expect(main.getByRole("link", { name: address })).toHaveAttribute(
+        "href",
+        `mailto:${address}`,
+      );
+    await expect(main).not.toContainText("hassaan@recurmail.com");
   }
   for (const route of [
     "/",
