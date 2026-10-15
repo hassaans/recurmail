@@ -11,6 +11,8 @@ type ConfirmDialogProps = {
   confirmLabel: string;
   tone?: "danger" | "default";
   busy?: boolean;
+  /** Failure message shown inside the dialog, since the page behind it is inert. */
+  error?: string | null;
   onCancel: () => void;
   onConfirm: () => void;
 };
@@ -24,6 +26,7 @@ export default function ConfirmDialog({
   confirmLabel,
   tone = "default",
   busy = false,
+  error = null,
   onCancel,
   onConfirm,
 }: ConfirmDialogProps) {
@@ -50,6 +53,11 @@ export default function ConfirmDialog({
     >
       <h2 id={titleId}>{title}</h2>
       <p id={descriptionId}>{description}</p>
+      {error ? (
+        <p className={`${controls.error} ${styles.error}`} role="alert">
+          {error}
+        </p>
+      ) : null}
       <div className={styles.actions}>
         <button
           className={controls.secondary}

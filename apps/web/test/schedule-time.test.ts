@@ -71,6 +71,21 @@ describe("formatScheduleTime", () => {
     expect(zoneLabel("Asia/Kolkata", "2026-12-01T12:00:00.000Z")).toBe("IST");
   });
 
+  it("follows Egypt's daylight-saving period for Cairo instead of a fixed label", () => {
+    expect(zoneLabel("Africa/Cairo", "2026-07-01T12:00:00.000Z")).toBe("EEST");
+    expect(zoneLabel("Africa/Cairo", "2026-12-01T12:00:00.000Z")).toBe("EET");
+    expect(
+      formatScheduleTime("2026-07-01T06:00:00.000Z", "Africa/Cairo", {
+        year: false,
+      }),
+    ).toBe("Wed, Jul 1 at 9:00 AM EEST");
+  });
+
+  it("keeps the fixed label for zones Intl only names by offset", () => {
+    expect(zoneLabel("Asia/Karachi", "2026-07-01T12:00:00.000Z")).toBe("PKT");
+    expect(zoneLabel("Asia/Tokyo", "2026-07-01T12:00:00.000Z")).toBe("JST");
+  });
+
   it("falls back to a numeric offset for zones without a common abbreviation", () => {
     expect(zoneLabel("Pacific/Kiritimati", "2026-12-01T12:00:00.000Z")).toMatch(
       /^GMT\+14$/,

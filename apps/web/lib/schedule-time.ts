@@ -2,6 +2,9 @@
 // schedule's own IANA timezone with a short zone label, never in the
 // browser's or server's zone.
 
+// Fallback labels for zones whose Intl short name is only a numeric offset in
+// every locale we try. The date-aware Intl lookup always runs first so a zone
+// that observes daylight saving (Cairo, for example) keeps its seasonal label.
 const fixedZoneLabels: Record<string, string> = {
   "Asia/Karachi": "PKT",
   "Asia/Kolkata": "IST",
@@ -25,7 +28,6 @@ const fixedZoneLabels: Record<string, string> = {
   "Africa/Lagos": "WAT",
   "Africa/Nairobi": "EAT",
   "Africa/Johannesburg": "SAST",
-  "Africa/Cairo": "EET",
   "America/Sao_Paulo": "BRT",
   "America/Argentina/Buenos_Aires": "ART",
 };
@@ -63,16 +65,14 @@ export function isValidTimezone(timezone: string): boolean {
 export function zoneLabel(timezone: string, at: string | Date): string {
   const date = toDate(at) ?? new Date();
   if (!isValidTimezone(timezone)) return "UTC";
-  const fixed = fixedZoneLabels[timezone];
-  if (fixed) return fixed;
-  let fallback = "";
+  let numeric = "";
   for (const locale of labelLocales) {
     const label = zonePart(date, timezone, locale);
     if (!label) continue;
     if (!/^(GMT|UTC)[+-]/.test(label)) return label;
-    if (!fallback) fallback = label;
+    if (!numeric) numeric = label;
   }
-  return fallback || timezone;
+  return fixedZoneLabels[timezone] ?? (numeric || timezone);
 }
 
 function clockParts(date: Date, timezone: string) {
