@@ -54,7 +54,7 @@
   justify-content: flex-end;
   gap: 24px;
   flex-wrap: wrap;
-  margin: 0;
+  margin: 0 0 0 auto;
   padding: 0;
   list-style: none;
 }
@@ -74,8 +74,12 @@
   white-space: nowrap;
 }
 
-.page :global(.nav-links a.nav-primary) {
+.page :global(.nav a.nav-primary) {
+  flex: none;
+  margin-left: 4px;
+  text-decoration: none;
   padding: 11px 16px;
+  font-size: 15px;
   border-radius: var(--rm-radius-pill);
   background: var(--rm-grape);
   color: #fff;
@@ -83,9 +87,14 @@
   white-space: nowrap;
 }
 
-.page :global(.nav-links a.nav-primary:hover) {
+.page :global(.nav a.nav-primary:hover) {
   background: var(--rm-grape-dark);
   color: #fff;
+}
+
+/* Long URLs such as the Gmail scope must wrap on phones instead of widening the page. */
+.main code {
+  overflow-wrap: anywhere;
 }
 
 .main {
@@ -151,23 +160,76 @@
   margin: 0;
 }
 
+@media (max-width: 860px) {
+  .page :global(.nav) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "logo cta"
+      "links links";
+    align-items: center;
+    gap: 14px 12px;
+    /* Tab follows the rows: logo, sign-up button, then the links. */
+    reading-flow: grid-rows;
+  }
+
+  .page :global(.logo) {
+    grid-area: logo;
+    justify-self: start;
+  }
+
+  .page :global(.nav a.nav-primary) {
+    grid-area: cta;
+    margin-left: 0;
+  }
+
+  .page :global(.nav-links) {
+    grid-area: links;
+    justify-content: flex-start;
+    gap: 10px 20px;
+    margin: 0;
+  }
+
+  .page :global(.nav-links li:last-child) {
+    margin-left: auto;
+  }
+}
+
 @media (max-width: 620px) {
   .page :global(.wrap) {
     width: min(100% - 40px, 1120px);
   }
 
-  .page :global(.nav) {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 14px;
+  .page :global(.logo) {
+    gap: 8px;
+    font-size: 22px;
   }
 
-  .page :global(.nav-links) {
-    justify-content: flex-start;
-    gap: 10px 18px;
+  .page :global(.logo svg) {
+    width: 30px;
+    height: 30px;
+  }
+
+  .page :global(.nav a.nav-primary) {
+    padding: 10px 12px;
+    font-size: 14px;
   }
 
   .main {
     padding-top: 24px;
+  }
+}
+
+@media (max-width: 359px) {
+  .page :global(.nav) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "logo"
+      "cta"
+      "links";
+  }
+
+  .page :global(.nav a.nav-primary) {
+    justify-self: start;
   }
 }
