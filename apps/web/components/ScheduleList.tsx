@@ -56,6 +56,7 @@ export default function ScheduleList({
   const [pendingDelete, setPendingDelete] = useState<ScheduleSummary | null>(
     null,
   );
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const canEdit = connectionStatus === "connected";
 
   async function reload() {
@@ -130,14 +131,27 @@ export default function ScheduleList({
     }
   }
 
+  function cancelDelete() {
+    setPendingDelete(null);
+    setDeleteError(null);
+  }
+
+  // While the dialog is open the rest of the page is inert, so a failed
+  // delete has to report inside the dialog, not in the page-level alert.
   async function confirmDelete() {
     if (!pendingDelete) return;
+    setDeleteError(null);
     const ok = await mutate(
       `/api/schedules/${encodeURIComponent(pendingDelete.id)}`,
       "DELETE",
       pendingDelete.id,
     );
-    if (ok) setPendingDelete(null);
+    if (ok) {
+      setPendingDelete(null);
+      return;
+    }
+    setError(null);
+    setDeleteError("That schedule could not be deleted. Try again.");
   }
 
   const anyActive = schedules.some((schedule) => schedule.status === "active");
@@ -271,7 +285,8 @@ export default function ScheduleList({
           confirmLabel="Delete schedule"
           tone="danger"
           busy={busy}
-          onCancel={() => setPendingDelete(null)}
+          error={deleteError}
+          onCancel={cancelDelete}
           onConfirm={confirmDelete}
         />
       ) : null}

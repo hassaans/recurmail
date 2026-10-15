@@ -256,3 +256,69 @@ test("keyboard users reach a skip link first and can tab into the main navigatio
       }),
   ).toBeFocused();
 });
+
+test("a failed delete reports inside the confirmation dialog and lets the user retry", async ({
+  page,
+}) => {
+  const created = await createSchedule(page, {
+    subject: "Fragile reminder",
+    body_text: "Fragile message",
+    to: ["fragile@example.test"],
+    rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;BYSECOND=0",
+    timezone: "UTC",
+  });
+  expect(created.status).toBe(201);
+  await page.reload();
+  const card = page
+    .getByRole("listitem")
+    .filter({ hasText: "Fragile reminder" });
+  await expect(card).toHaveCount(1);
+
+  // The first DELETE fails at the API; the second goes through.
+  let failures = 0;
+  await page.route("**/api/schedules/*", async (route) => {
+    if (route.request().method() === "DELETE" && failures === 0) {
+      failures += 1;
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "fixture failure" }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  const dialog = page.getByRole("dialog", { name: "Delete this schedule?" });
+  await expect(async () => {
+    await card.getByRole("button", { name: "Delete" }).click();
+    await expect(dialog).toBeVisible({ timeout: 1000 });
+  }).toPass();
+  const confirm = dialog.getByRole("button", { name: "Delete schedule" });
+  await confirm.click();
+  const dialogAlert = dialog.getByRole("alert");
+  await expect(dialogAlert).toHaveText(
+    "That schedule could not be deleted. Try again.",
+  );
+  await expect(dialog).toBeVisible();
+  await expect(confirm).toBeEnabled();
+  await expect(card).toHaveCount(1);
+  // The page-level alert must not carry the failure: the page is inert.
+  // Scoped to main so the Next.js dev overlay's own alert is not counted.
+  const appAlerts = page.getByRole("main").getByRole("alert");
+  await expect(appAlerts).toHaveCount(1);
+  expect(failures).toBe(1);
+
+  // Cancelling clears the message; reopening starts clean.
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(appAlerts).toHaveCount(0);
+  await card.getByRole("button", { name: "Delete" }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialogAlert).toHaveCount(0);
+
+  await confirm.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(card).toHaveCount(0);
+  await expect(appAlerts).toHaveCount(0);
+});
