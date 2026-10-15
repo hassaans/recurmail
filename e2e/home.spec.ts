@@ -106,6 +106,10 @@ test("on phones the header keeps the logo and sign-up button on one row, with th
       ).toBeLessThan(2);
       await expect(signup).toHaveCSS("text-decoration-line", "none");
       await expect(signup).toHaveCSS("white-space", "nowrap");
+      // Keyboard focus follows the rows: from the logo straight to sign-up.
+      await logo.focus();
+      await page.keyboard.press("Tab");
+      await expect(signup).toBeFocused();
 
       const pageWidths = await page.evaluate(() => ({
         document: document.documentElement.scrollWidth,
@@ -113,6 +117,36 @@ test("on phones the header keeps the logo and sign-up button on one row, with th
       }));
       expect(pageWidths.document).toBeLessThanOrEqual(pageWidths.viewport);
     }
+  }
+});
+
+test("on desktop the header is one row with the sign-up button last, at its original size", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  for (const path of ["/", "/guides/recurring-email-gmail", "/terms"]) {
+    await page.goto(path);
+    await page.evaluate(() => document.fonts.ready);
+    const nav = page.getByRole("navigation", { name: "Main navigation" });
+    const signup = nav.getByRole("link", {
+      name: "Create free account",
+      exact: true,
+    });
+    const login = nav.getByRole("link", { name: "Log in", exact: true });
+    await expect(signup).toHaveCSS("font-size", "15px");
+    await expect(signup).toHaveCSS("text-decoration-line", "none");
+    const signupBox = await signup.boundingBox();
+    const loginBox = await login.boundingBox();
+    if (!signupBox || !loginBox) throw new Error("header links must render");
+    expect(signupBox.x).toBeGreaterThan(loginBox.x + loginBox.width);
+    expect(
+      Math.abs(
+        signupBox.y + signupBox.height / 2 - (loginBox.y + loginBox.height / 2),
+      ),
+    ).toBeLessThan(4);
+    await login.focus();
+    await page.keyboard.press("Tab");
+    await expect(signup).toBeFocused();
   }
 });
 
