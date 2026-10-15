@@ -393,6 +393,13 @@
 .numberInput {
   width: 84px;
   font-variant-numeric: tabular-nums;
+  /* The native spinner looks out of place next to the pill selects; arrow keys still step the value. */
+  appearance: textfield;
+}
+.numberInput::-webkit-inner-spin-button,
+.numberInput::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
 }
 .dateInput {
   min-width: 170px;
