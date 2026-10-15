@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   ensureTimeZoneOption,
   filterTimeZones,
+  groupTimeZones,
   type TimeZoneOption,
   timeZoneLabel,
   timeZoneOptions,
@@ -18,7 +19,43 @@ interface TimeZoneFieldProps {
   error?: string;
 }
 
-const VISIBLE_LIMIT = 80;
+interface ListItem {
+  option: TimeZoneOption;
+  /** Group heading rendered above this item, when it starts a group. */
+  heading: string | null;
+  key: string;
+}
+
+function browserTimeZone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Suggested, Common and All groups flattened into one keyboard-navigable list. */
+function groupedItems(options: TimeZoneOption[], value: string): ListItem[] {
+  const items: ListItem[] = [];
+  for (const group of groupTimeZones(options, value, browserTimeZone())) {
+    group.options.forEach((option, index) => {
+      items.push({
+        option,
+        heading: index === 0 ? group.name : null,
+        key: `${group.name}:${option.id}`,
+      });
+    });
+  }
+  return items;
+}
+
+function searchItems(options: TimeZoneOption[], query: string): ListItem[] {
+  return filterTimeZones(options, query).map((option) => ({
+    option,
+    heading: null,
+    key: option.id,
+  }));
+}
 
 export default function TimeZoneField({
   id,
@@ -41,14 +78,16 @@ export default function TimeZoneField({
     () => (allOptions ? ensureTimeZoneOption(allOptions, value) : []),
     [allOptions, value],
   );
-  const results = useMemo(
-    () => (query === null ? options : filterTimeZones(options, query)),
-    [options, query],
+  const items = useMemo(
+    () =>
+      query === null
+        ? groupedItems(options, value)
+        : searchItems(options, query),
+    [options, query, value],
   );
-  const visible = results.slice(0, VISIBLE_LIMIT);
   const label = timeZoneLabel(value);
   const activeId =
-    open && visible[activeIndex] ? `${listId}-${activeIndex}` : undefined;
+    open && items[activeIndex] ? `${listId}-${activeIndex}` : undefined;
 
   function ensureOptions(): TimeZoneOption[] {
     if (allOptions) return allOptions;
@@ -58,11 +97,11 @@ export default function TimeZoneField({
   }
 
   function openList(nextQuery: string | null) {
-    const built = ensureTimeZoneOption(ensureOptions(), value);
-    const list = nextQuery === null ? built : filterTimeZones(built, nextQuery);
-    const current = list.findIndex((option) => option.id === value);
+    ensureOptions();
     setQuery(nextQuery);
-    setActiveIndex(current >= 0 && current < VISIBLE_LIMIT ? current : 0);
+    // With no query the current zone heads the Suggested group, so index 0 is
+    // the selection and the list opens scrolled to it.
+    setActiveIndex(0);
     setOpen(true);
   }
 
@@ -80,16 +119,22 @@ export default function TimeZoneField({
 
   useEffect(() => {
     if (!open || !activeId) return;
-    document
-      .getElementById(activeId)
-      ?.scrollIntoView({ block: "nearest", behavior: "instant" });
+    const element = document.getElementById(activeId);
+    if (!element) return;
+    // Keep a heading visible above the first item of a group.
+    const heading = element.previousElementSibling;
+    const target =
+      heading && heading.getAttribute("role") === "presentation"
+        ? heading
+        : element;
+    target.scrollIntoView({ block: "nearest", behavior: "instant" });
   }, [open, activeId]);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
       if (!open) openList(query);
-      else setActiveIndex((index) => Math.min(index + 1, visible.length - 1));
+      else setActiveIndex((index) => Math.min(index + 1, items.length - 1));
       return;
     }
     if (event.key === "ArrowUp") {
@@ -105,13 +150,13 @@ export default function TimeZoneField({
     }
     if (event.key === "End" && open) {
       event.preventDefault();
-      setActiveIndex(visible.length - 1);
+      setActiveIndex(items.length - 1);
       return;
     }
     if (event.key === "Enter") {
       if (!open) return;
       event.preventDefault();
-      select(visible[activeIndex]);
+      select(items[activeIndex]?.option);
       return;
     }
     if (event.key === "Escape") {
@@ -123,14 +168,14 @@ export default function TimeZoneField({
     }
     if (event.key === "Tab" && open) {
       // Typing a unique match and tabbing away keeps it, like a native select.
-      if (query && visible.length === 1) onChange(visible[0].id);
+      if (query && items.length === 1) onChange(items[0].option.id);
       close();
     }
   }
 
   function handleBlur(event: React.FocusEvent<HTMLInputElement>) {
     if (popupRef.current?.contains(event.relatedTarget as Node | null)) return;
-    if (open && query && visible.length === 1) onChange(visible[0].id);
+    if (open && query && items.length === 1) onChange(items[0].option.id);
     close();
   }
 
@@ -154,7 +199,7 @@ export default function TimeZoneField({
           autoComplete="off"
           spellCheck={false}
           value={query === null ? label : query}
-          placeholder="Search by city or region"
+          placeholder="Search by city, country or abbreviation"
           onFocus={(event) => event.target.select()}
           onClick={() => {
             if (!open) openList(null);
@@ -180,39 +225,46 @@ export default function TimeZoneField({
             role="listbox"
             aria-label="Time zones"
           >
-            {visible.map((option, index) => (
-              <div
-                key={option.id}
-                id={`${listId}-${index}`}
-                className={`${styles.option} ${index === activeIndex ? styles.optionActive : ""}`}
-                role="option"
-                aria-selected={option.id === value}
-                tabIndex={-1}
-                onMouseDown={(event) => event.preventDefault()}
-                onMouseMove={() => {
-                  if (index !== activeIndex) setActiveIndex(index);
-                }}
-                onClick={() => select(option)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") select(option);
-                }}
-              >
-                <span className={styles.optionName}>
-                  {option.label.replace(/ \(.*$/, "")}
-                </span>
-                <span className={styles.optionMeta}>
-                  {option.id} · {option.label.replace(/^.*, /, "")}
-                </span>
+            {items.map((item, index) => (
+              <div key={item.key} className={styles.entry}>
+                {item.heading ? (
+                  <div
+                    className={styles.groupHead}
+                    role="presentation"
+                    data-testid="time-zone-group"
+                  >
+                    {item.heading}
+                  </div>
+                ) : null}
+                <div
+                  id={`${listId}-${index}`}
+                  className={`${styles.option} ${index === activeIndex ? styles.optionActive : ""}`}
+                  role="option"
+                  aria-selected={item.option.id === value}
+                  tabIndex={-1}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseMove={() => {
+                    if (index !== activeIndex) setActiveIndex(index);
+                  }}
+                  onClick={() => select(item.option)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") select(item.option);
+                  }}
+                >
+                  <span className={styles.optionName}>
+                    {item.option.label.replace(/ \(.*$/, "")}
+                  </span>
+                  <span className={styles.optionMeta}>
+                    {item.option.id} · {item.option.label.replace(/^.*, /, "")}
+                  </span>
+                </div>
               </div>
             ))}
           </div>
-          {visible.length === 0 ? (
-            <p className={styles.note}>No time zone matches “{query}”.</p>
-          ) : null}
-          {results.length > VISIBLE_LIMIT ? (
+          {items.length === 0 ? (
             <p className={styles.note}>
-              Keep typing to narrow the list ({results.length - VISIBLE_LIMIT}{" "}
-              more).
+              No time zone matches “{query}”. Try a city, country or
+              abbreviation such as PKT.
             </p>
           ) : null}
         </div>

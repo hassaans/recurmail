@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   describeSchedule,
   ensureTimeZoneOption,
@@ -439,5 +439,54 @@ describe("next send rows", () => {
       year: "2026",
       time: "9:00 PM",
     });
+  });
+});
+
+describe("abbreviations under a runtime that names a zone by its offset", () => {
+  // Chromium's ICU calls Europe/London "GMT+00:00" in winter instead of
+  // "Greenwich Mean Time", so the abbreviation cannot come from the long name.
+  it("still ranks Europe/London first for GMT and BST", () => {
+    const Original = Intl.DateTimeFormat;
+    // A function declaration rather than an arrow: the mock is invoked with
+    // `new`, like the real constructor.
+    function offsetNamedLondon(
+      locale?: string | string[],
+      options?: Intl.DateTimeFormatOptions,
+    ) {
+      const formatter = new Original(locale, options);
+      if (
+        options?.timeZone !== "Europe/London" ||
+        options.timeZoneName !== "long"
+      )
+        return formatter;
+      return {
+        format: (date?: Date | number) => formatter.format(date),
+        formatToParts: (date?: Date | number) =>
+          formatter
+            .formatToParts(date)
+            .map((part) =>
+              part.type === "timeZoneName" &&
+              part.value === "Greenwich Mean Time"
+                ? { ...part, value: "GMT+00:00" }
+                : part,
+            ),
+        resolvedOptions: () => formatter.resolvedOptions(),
+      } as unknown as Intl.DateTimeFormat;
+    }
+    const spy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(
+        offsetNamedLondon as unknown as typeof Intl.DateTimeFormat,
+      );
+    try {
+      const at = new Date("2026-01-15T12:00:00Z");
+      const options = timeZoneOptions(at);
+      const london = options.find((option) => option.id === "Europe/London");
+      expect(london?.label).toBe("London (Europe/London), UTC+0");
+      expect(filterTimeZones(options, "GMT")[0]?.id).toBe("Europe/London");
+      expect(filterTimeZones(options, "BST")[0]?.id).toBe("Europe/London");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

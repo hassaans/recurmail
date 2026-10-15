@@ -2,12 +2,21 @@
 
 import { nextOccurrence, presets, type Weekday } from "@recurmail/core";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  buildCustomRule,
+  type CustomRule,
+  customFromRule,
+  defaultCustomRule,
+  describeRuleText,
   describeSchedule,
+  INTERVAL_UNITS,
+  type IntervalUnit,
   isKnownTimeZone,
   localTimeFromRule,
+  MONTH_NAMES,
   normalizeLink,
+  ORDINAL_POSITIONS,
   ordinal,
   type Repeat,
   repeatFromRule,
@@ -66,6 +75,9 @@ const REPEAT_OPTIONS: { value: Repeat; label: string }[] = [
 
 const WEEKDAY_KEYS: Weekday[] = ["MO", "TU", "WE", "TH", "FR"];
 const ALL_DAYS: Weekday[] = WEEKDAYS.map((day) => day.key);
+const MONTH_DAYS = Array.from({ length: 31 }, (_, index) => index + 1);
+const LEAVE_MESSAGE =
+  "Leave without saving? The changes to this schedule will be lost.";
 
 const TOOLBAR: {
   command: FormatCommand;
@@ -180,6 +192,45 @@ function Callout({
   );
 }
 
+function DayChips({
+  value,
+  onChange,
+  invalid,
+}: {
+  value: Weekday[];
+  onChange: (days: Weekday[]) => void;
+  invalid: boolean;
+}) {
+  return (
+    <div className={`${styles.days} ${invalid ? styles.daysInvalid : ""}`}>
+      {WEEKDAYS.map((day) => (
+        <label
+          key={day.key}
+          className={styles.day}
+          data-testid={`day-chip-${day.key}`}
+        >
+          <input
+            id={`day-${day.key}`}
+            type="checkbox"
+            aria-label={day.name}
+            checked={value.includes(day.key)}
+            onChange={(event) =>
+              onChange(
+                sortWeekdays(
+                  event.target.checked
+                    ? [...value, day.key]
+                    : value.filter((item) => item !== day.key),
+                ),
+              )
+            }
+          />
+          <span aria-hidden="true">{day.letter}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 export default function ScheduleEditor({
   scheduleId,
 }: {
@@ -200,10 +251,14 @@ export default function ScheduleEditor({
   const [monthDay, setMonthDay] = useState(1);
   const [time, setTime] = useState("09:00");
   const [timezone, setTimezone] = useState("UTC");
-  const [customRule, setCustomRule] = useState(
-    "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO",
+  const [custom, setCustom] = useState<CustomRule>(() =>
+    defaultCustomRule(new Date(), "UTC"),
   );
+  // A saved rule the builder cannot show (for example one with BYSETPOS). It
+  // is kept verbatim and shown as a read-only summary until replaced.
+  const [lockedRule, setLockedRule] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(scheduleId));
+  const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
@@ -216,6 +271,11 @@ export default function ScheduleEditor({
     html: string | null;
     text: string;
   } | null>(null);
+  // Unsaved-changes guard: a fingerprint of the form taken once it is ready,
+  // plus a flag for message edits (the editor body lives outside React state).
+  const baselineRef = useRef<string | null>(null);
+  const bodyEditedRef = useRef(false);
+  const leavingRef = useRef(false);
 
   // New schedules start in the browser's zone at the next whole hour on today's
   // weekday. Existing schedules keep what was saved.
@@ -226,6 +286,8 @@ export default function ScheduleEditor({
     setTimezone(zone);
     setSelectedDays([defaults.weekday]);
     setTime(defaults.time);
+    setCustom(defaultCustomRule(new Date(), zone));
+    setReady(true);
   }, [scheduleId]);
 
   useEffect(() => {
@@ -233,6 +295,7 @@ export default function ScheduleEditor({
     bodyRef.current.innerHTML = bodyContent.html ?? "";
     if (!bodyContent.html) bodyRef.current.textContent = bodyContent.text;
     setMessageEmpty(!bodyRef.current.innerText.trim());
+    setReady(true);
   }, [bodyContent, loading]);
 
   useEffect(() => {
@@ -263,11 +326,11 @@ export default function ScheduleEditor({
         if (days.length > 0) setSelectedDays(days);
         const monthDayField = /BYMONTHDAY=(\d+)/i.exec(existing.rrule);
         if (monthDayField) setMonthDay(Number(monthDayField[1]));
-        setCustomRule(
-          existing.rrule
-            .replace(/^DTSTART[^\n]*\n/i, "")
-            .replace(/^RRULE:/i, ""),
-        );
+        if (mode === "custom") {
+          const parsed = customFromRule(existing.rrule, existing.timezone);
+          if (parsed) setCustom(parsed);
+          else setLockedRule(existing.rrule);
+        }
         setBodyContent({ html: existing.body_html, text: existing.body_text });
       })
       .catch((cause: unknown) => {
@@ -307,36 +370,19 @@ export default function ScheduleEditor({
   }, []);
 
   const rrule = useMemo(() => {
+    if (lockedRule) return lockedRule;
     try {
       const [hourText, minuteText] = time.split(":");
       const clock = { hour: Number(hourText), minute: Number(minuteText) };
-      if (repeat === "custom") {
-        const validated = presets.custom(customRule);
-        const lines = validated.split("\n");
-        const ruleIndex = lines.findIndex((line) => /^RRULE:/i.test(line));
-        const prefix = ruleIndex < 0 ? "RRULE:" : "";
-        const raw =
-          ruleIndex < 0 ? lines[0] : lines[ruleIndex].replace(/^RRULE:/i, "");
-        const fields = raw
-          .split(";")
-          .filter((field) => !/^BY(?:HOUR|MINUTE|SECOND)=/i.test(field));
-        fields.push(
-          `BYHOUR=${clock.hour}`,
-          `BYMINUTE=${clock.minute}`,
-          "BYSECOND=0",
-        );
-        if (ruleIndex < 0)
-          return presets.custom(`${prefix}${fields.join(";")}`);
-        lines[ruleIndex] = `RRULE:${fields.join(";")}`;
-        return presets.custom(lines.join("\n"));
-      }
+      if (repeat === "custom")
+        return presets.custom(buildCustomRule(custom, time, timezone));
       if (repeat === "daily") return presets.daily(clock);
       if (repeat === "weekly") return presets.weekly(selectedDays, clock);
       return presets.monthly(monthDay, clock);
     } catch {
       return "";
     }
-  }, [customRule, monthDay, repeat, selectedDays, time]);
+  }, [custom, lockedRule, monthDay, repeat, selectedDays, time, timezone]);
 
   const nextSends = useMemo(() => {
     if (!rrule || !isKnownTimeZone(timezone)) return [];
@@ -355,13 +401,95 @@ export default function ScheduleEditor({
     }
   }, [rrule, timezone]);
 
-  const summary = describeSchedule({
+  // Everything that ends up in the saved schedule, except the message body.
+  const fingerprint = JSON.stringify({
+    subject,
+    to,
+    cc,
+    bcc,
     repeat,
-    days: selectedDays,
+    selectedDays,
     monthDay,
     time,
-    timeZone: timezone,
+    timezone,
+    custom,
+    lockedRule,
   });
+  const dirtyRef = useRef(false);
+  useEffect(() => {
+    if (!ready) return;
+    if (baselineRef.current === null) baselineRef.current = fingerprint;
+    dirtyRef.current =
+      fingerprint !== baselineRef.current || bodyEditedRef.current;
+  }, [ready, fingerprint]);
+
+  // Leaving with unsaved edits asks first: browser close, reload and back go
+  // through beforeunload; same-tab link clicks (Cancel, Dashboard, logo) get a
+  // confirm dialog. Saving clears the guard before it navigates.
+  useEffect(() => {
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      if (!dirtyRef.current || leavingRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    function handleLinkClick(event: MouseEvent) {
+      if (!dirtyRef.current || leavingRef.current) return;
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      const target = event.target as Element | null;
+      const anchor = target?.closest?.("a[href]");
+      if (!anchor || anchor.closest("[contenteditable]")) return;
+      const href = anchor.getAttribute("href") ?? "";
+      if (href.startsWith("#") || anchor.getAttribute("target") === "_blank")
+        return;
+      if (window.confirm(LEAVE_MESSAGE)) {
+        leavingRef.current = true;
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleLinkClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleLinkClick, true);
+    };
+  }, []);
+
+  const replaceLockedRule = useCallback(() => {
+    const defaults = scheduleDefaults(new Date(), timezone);
+    setLockedRule(null);
+    setRepeat("weekly");
+    setSelectedDays([defaults.weekday]);
+    setTime(defaults.time);
+    setCustom(defaultCustomRule(new Date(), timezone));
+    requestAnimationFrame(() =>
+      document.getElementById("repeat-weekly")?.focus(),
+    );
+  }, [timezone]);
+
+  function updateCustom(patch: Partial<CustomRule>) {
+    setCustom((current) => ({ ...current, ...patch }));
+  }
+
+  const summary = lockedRule
+    ? describeRuleText(lockedRule, timezone)
+    : describeSchedule({
+        repeat,
+        days: selectedDays,
+        monthDay,
+        time,
+        timeZone: timezone,
+        custom,
+      });
   const zoneName = isKnownTimeZone(timezone)
     ? timeZoneRegionName(timezone, new Date())
     : timezone;
@@ -380,9 +508,20 @@ export default function ScheduleEditor({
     if (messageEmpty) errors.message = "Write a message.";
     if (repeat === "weekly" && selectedDays.length === 0)
       errors.days = "Pick at least one day.";
-    if (repeat === "custom" && !rrule)
-      errors.custom =
-        "This rule isn't valid. Use RRULE syntax such as FREQ=WEEKLY;INTERVAL=2;BYDAY=MO.";
+    if (repeat === "custom" && !lockedRule) {
+      if (custom.unit === "weeks" && custom.days.length === 0)
+        errors.days = "Pick at least one day.";
+      if (!(custom.interval >= 1))
+        errors.custom = "Enter how often it repeats, 1 or more.";
+      else if (custom.ends === "after" && !(custom.endCount >= 1))
+        errors.custom = "Enter how many sends, 1 or more.";
+      else if (custom.ends === "on" && !custom.endDate)
+        errors.custom = "Pick an end date.";
+      else if (!rrule) errors.custom = "Finish the repeat pattern.";
+      else if (isKnownTimeZone(timezone) && nextSends.length === 0)
+        errors.custom =
+          "This schedule has no upcoming sends. Change the end date or count.";
+    }
     if (!isKnownTimeZone(timezone))
       errors.timezone = "Pick a time zone from the list.";
     return errors;
@@ -398,7 +537,7 @@ export default function ScheduleEditor({
       ["subject", "subject"],
       ["message", "message"],
       ["days", "day-MO"],
-      ["custom", "custom-rule"],
+      ["custom", "custom-interval"],
       ["timezone", "timezone"],
     ];
     for (const [key, id] of order) {
@@ -493,6 +632,8 @@ export default function ScheduleEditor({
       setWarning(returnedWarning);
       const query = new URLSearchParams({ saved: "1", id: result.schedule.id });
       if (returnedWarning) query.set("warning", returnedWarning);
+      leavingRef.current = true;
+      dirtyRef.current = false;
       router.push(`/dashboard?${query.toString()}`);
     } catch (cause) {
       setError(
@@ -679,9 +820,11 @@ export default function ScheduleEditor({
                     tabIndex={0}
                     contentEditable
                     suppressContentEditableWarning
-                    onInput={(event) =>
-                      setMessageEmpty(!event.currentTarget.innerText.trim())
-                    }
+                    onInput={(event) => {
+                      bodyEditedRef.current = true;
+                      dirtyRef.current = true;
+                      setMessageEmpty(!event.currentTarget.innerText.trim());
+                    }}
                     onKeyDown={handleEditorKeys}
                   />
                 </div>
@@ -698,53 +841,58 @@ export default function ScheduleEditor({
                 <h2 id="schedule-title">Schedule</h2>
                 <p>How often it goes out, and when.</p>
               </div>
-              <fieldset className={styles.fieldset}>
-                <legend className={styles.legend}>Repeat</legend>
-                <div className={styles.segmented}>
-                  {REPEAT_OPTIONS.map((option) => (
-                    <label key={option.value} className={styles.segment}>
-                      <input
-                        type="radio"
-                        name="repeat"
-                        value={option.value}
-                        checked={repeat === option.value}
-                        onChange={() => setRepeat(option.value)}
-                      />
-                      <span>{option.label}</span>
-                    </label>
-                  ))}
+              {lockedRule ? (
+                <div className={styles.locked} data-testid="locked-rule">
+                  <p className={styles.lockedTitle}>
+                    This schedule uses a repeat pattern the editor can&rsquo;t
+                    change here.
+                  </p>
+                  <p className={styles.lockedSummary}>{summary}</p>
+                  <p className={styles.hint}>
+                    Saving keeps the pattern as it is. To pick a new one, start
+                    over with the options below.
+                  </p>
+                  <div>
+                    <button
+                      type="button"
+                      className={styles.secondary}
+                      onClick={replaceLockedRule}
+                    >
+                      Replace with a new schedule
+                    </button>
+                  </div>
                 </div>
-              </fieldset>
-              {repeat === "weekly" ? (
+              ) : (
+                <fieldset className={styles.fieldset}>
+                  <legend className={styles.legend}>Repeat</legend>
+                  <div className={styles.segmented}>
+                    {REPEAT_OPTIONS.map((option) => (
+                      <label key={option.value} className={styles.segment}>
+                        <input
+                          id={`repeat-${option.value}`}
+                          type="radio"
+                          name="repeat"
+                          value={option.value}
+                          checked={repeat === option.value}
+                          onChange={() => setRepeat(option.value)}
+                        />
+                        <span>{option.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
+              {!lockedRule && repeat === "weekly" ? (
                 <fieldset
                   className={styles.fieldset}
                   aria-describedby={fieldErrors.days ? "days-error" : undefined}
                 >
                   <legend className={styles.legend}>Days</legend>
-                  <div
-                    className={`${styles.days} ${fieldErrors.days ? styles.daysInvalid : ""}`}
-                  >
-                    {WEEKDAYS.map((day) => (
-                      <label key={day.key} className={styles.day}>
-                        <input
-                          id={`day-${day.key}`}
-                          type="checkbox"
-                          aria-label={day.name}
-                          checked={selectedDays.includes(day.key)}
-                          onChange={(event) =>
-                            setSelectedDays((current) =>
-                              sortWeekdays(
-                                event.target.checked
-                                  ? [...current, day.key]
-                                  : current.filter((item) => item !== day.key),
-                              ),
-                            )
-                          }
-                        />
-                        <span aria-hidden="true">{day.letter}</span>
-                      </label>
-                    ))}
-                  </div>
+                  <DayChips
+                    value={selectedDays}
+                    onChange={setSelectedDays}
+                    invalid={Boolean(fieldErrors.days)}
+                  />
                   <div className={styles.quickPicks}>
                     <button
                       type="button"
@@ -768,7 +916,7 @@ export default function ScheduleEditor({
                   ) : null}
                 </fieldset>
               ) : null}
-              {repeat === "monthly" ? (
+              {!lockedRule && repeat === "monthly" ? (
                 <div className={styles.field}>
                   <label htmlFor="month-day">Date of month</label>
                   <div className={styles.selectWrap}>
@@ -780,13 +928,11 @@ export default function ScheduleEditor({
                       }
                       aria-describedby="month-day-hint"
                     >
-                      {Array.from({ length: 31 }, (_, index) => index + 1).map(
-                        (day) => (
-                          <option key={day} value={day}>
-                            {ordinal(day)}
-                          </option>
-                        ),
-                      )}
+                      {MONTH_DAYS.map((day) => (
+                        <option key={day} value={day}>
+                          {ordinal(day)}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   {monthDay > 28 ? (
@@ -800,53 +946,318 @@ export default function ScheduleEditor({
                   )}
                 </div>
               ) : null}
-              {repeat === "custom" ? (
-                <div className={styles.field}>
-                  <label htmlFor="custom-rule">Custom rule</label>
-                  <textarea
-                    id="custom-rule"
-                    className={`${styles.mono} ${fieldErrors.custom ? styles.invalid : ""}`}
-                    value={customRule}
-                    onChange={(event) => setCustomRule(event.target.value)}
-                    rows={3}
-                    spellCheck={false}
-                    aria-invalid={fieldErrors.custom ? true : undefined}
-                    aria-describedby={
-                      fieldErrors.custom
-                        ? "custom-rule-error"
-                        : "custom-rule-hint"
-                    }
-                  />
+              {!lockedRule && repeat === "custom" ? (
+                <div className={styles.builder} data-testid="custom-builder">
+                  <div className={styles.builderRow}>
+                    <label
+                      htmlFor="custom-interval"
+                      className={styles.builderText}
+                    >
+                      Every
+                    </label>
+                    <input
+                      id="custom-interval"
+                      className={`${styles.numberInput} ${fieldErrors.custom ? styles.invalid : ""}`}
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={999}
+                      step={1}
+                      aria-label="Repeat every"
+                      value={custom.interval > 0 ? custom.interval : ""}
+                      onChange={(event) =>
+                        updateCustom({
+                          interval: Math.min(
+                            999,
+                            Math.max(0, Math.floor(Number(event.target.value))),
+                          ),
+                        })
+                      }
+                      aria-invalid={fieldErrors.custom ? true : undefined}
+                      aria-describedby={
+                        fieldErrors.custom ? "custom-error" : undefined
+                      }
+                    />
+                    <div className={styles.selectWrap}>
+                      <select
+                        id="custom-unit"
+                        aria-label="Repeat unit"
+                        value={custom.unit}
+                        onChange={(event) =>
+                          updateCustom({
+                            unit: event.target.value as IntervalUnit,
+                          })
+                        }
+                      >
+                        {INTERVAL_UNITS.map((unit) => (
+                          <option key={unit.key} value={unit.key}>
+                            {custom.interval === 1
+                              ? unit.singular
+                              : unit.plural}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  {custom.unit === "weeks" ? (
+                    <fieldset
+                      className={styles.fieldset}
+                      aria-describedby={
+                        fieldErrors.days ? "days-error" : undefined
+                      }
+                    >
+                      <legend className={styles.legend}>On</legend>
+                      <DayChips
+                        value={custom.days}
+                        onChange={(days) => updateCustom({ days })}
+                        invalid={Boolean(fieldErrors.days)}
+                      />
+                      {fieldErrors.days ? (
+                        <p id="days-error" className={styles.fieldError}>
+                          {fieldErrors.days}
+                        </p>
+                      ) : null}
+                    </fieldset>
+                  ) : null}
+                  {custom.unit === "months" ? (
+                    <fieldset className={styles.fieldset}>
+                      <legend className={styles.legend}>On</legend>
+                      <div className={styles.modeRow}>
+                        <input
+                          id="custom-month-mode-day"
+                          type="radio"
+                          name="custom-month-mode"
+                          value="day"
+                          checked={custom.monthlyMode === "day"}
+                          onChange={() => updateCustom({ monthlyMode: "day" })}
+                        />
+                        <label
+                          htmlFor="custom-month-mode-day"
+                          className={styles.builderText}
+                        >
+                          day
+                        </label>
+                        <div className={styles.selectWrap}>
+                          <select
+                            id="custom-month-day"
+                            aria-label="Day of the month"
+                            value={custom.monthDay}
+                            disabled={custom.monthlyMode !== "day"}
+                            onChange={(event) =>
+                              updateCustom({
+                                monthDay: Number(event.target.value),
+                              })
+                            }
+                          >
+                            {MONTH_DAYS.map((day) => (
+                              <option key={day} value={day}>
+                                {day}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      <div className={styles.modeRow}>
+                        <input
+                          id="custom-month-mode-weekday"
+                          type="radio"
+                          name="custom-month-mode"
+                          value="weekday"
+                          checked={custom.monthlyMode === "weekday"}
+                          onChange={() =>
+                            updateCustom({ monthlyMode: "weekday" })
+                          }
+                        />
+                        <label
+                          htmlFor="custom-month-mode-weekday"
+                          className={styles.builderText}
+                        >
+                          the
+                        </label>
+                        <div className={styles.selectWrap}>
+                          <select
+                            id="custom-ordinal"
+                            aria-label="Week of the month"
+                            value={custom.ordinal}
+                            disabled={custom.monthlyMode !== "weekday"}
+                            onChange={(event) =>
+                              updateCustom({
+                                ordinal: Number(
+                                  event.target.value,
+                                ) as CustomRule["ordinal"],
+                              })
+                            }
+                          >
+                            {ORDINAL_POSITIONS.map((position) => (
+                              <option
+                                key={position.value}
+                                value={position.value}
+                              >
+                                {position.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className={styles.selectWrap}>
+                          <select
+                            id="custom-weekday"
+                            aria-label="Weekday"
+                            value={custom.weekday}
+                            disabled={custom.monthlyMode !== "weekday"}
+                            onChange={(event) =>
+                              updateCustom({
+                                weekday: event.target.value as Weekday,
+                              })
+                            }
+                          >
+                            {WEEKDAYS.map((day) => (
+                              <option key={day.key} value={day.key}>
+                                {day.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      {custom.monthlyMode === "day" && custom.monthDay > 28 ? (
+                        <p className={styles.hint}>
+                          Months without a {ordinal(custom.monthDay)} are
+                          skipped.
+                        </p>
+                      ) : null}
+                    </fieldset>
+                  ) : null}
+                  {custom.unit === "years" ? (
+                    <fieldset className={styles.fieldset}>
+                      <legend className={styles.legend}>On</legend>
+                      <div className={styles.builderRow}>
+                        <div className={styles.selectWrap}>
+                          <select
+                            id="custom-month"
+                            aria-label="Month"
+                            value={custom.month}
+                            onChange={(event) =>
+                              updateCustom({
+                                month: Number(event.target.value),
+                              })
+                            }
+                          >
+                            {MONTH_NAMES.map((name, index) => (
+                              <option key={name} value={index + 1}>
+                                {name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className={styles.selectWrap}>
+                          <select
+                            id="custom-month-day"
+                            aria-label="Day of the month"
+                            value={custom.monthDay}
+                            onChange={(event) =>
+                              updateCustom({
+                                monthDay: Number(event.target.value),
+                              })
+                            }
+                          >
+                            {MONTH_DAYS.map((day) => (
+                              <option key={day} value={day}>
+                                {day}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </fieldset>
+                  ) : null}
+                  <fieldset className={styles.fieldset}>
+                    <legend className={styles.legend}>Ends</legend>
+                    <div className={styles.builderRow}>
+                      <div className={styles.selectWrap}>
+                        <select
+                          id="custom-ends"
+                          aria-label="Ends"
+                          value={custom.ends}
+                          onChange={(event) =>
+                            updateCustom({
+                              ends: event.target.value as CustomRule["ends"],
+                            })
+                          }
+                        >
+                          <option value="never">Never</option>
+                          <option value="on">On</option>
+                          <option value="after">After</option>
+                        </select>
+                      </div>
+                      {custom.ends === "on" ? (
+                        <input
+                          id="custom-end-date"
+                          className={styles.dateInput}
+                          type="date"
+                          aria-label="End date"
+                          value={custom.endDate}
+                          onChange={(event) =>
+                            updateCustom({ endDate: event.target.value })
+                          }
+                        />
+                      ) : null}
+                      {custom.ends === "after" ? (
+                        <>
+                          <input
+                            id="custom-end-count"
+                            className={styles.numberInput}
+                            type="number"
+                            inputMode="numeric"
+                            min={1}
+                            max={999}
+                            step={1}
+                            aria-label="Number of sends"
+                            value={custom.endCount > 0 ? custom.endCount : ""}
+                            onChange={(event) =>
+                              updateCustom({
+                                endCount: Math.min(
+                                  999,
+                                  Math.max(
+                                    0,
+                                    Math.floor(Number(event.target.value)),
+                                  ),
+                                ),
+                              })
+                            }
+                          />
+                          <span className={styles.builderText}>
+                            {custom.endCount === 1 ? "send" : "sends"}
+                          </span>
+                        </>
+                      ) : null}
+                    </div>
+                  </fieldset>
                   {fieldErrors.custom ? (
-                    <p id="custom-rule-error" className={styles.fieldError}>
+                    <p id="custom-error" className={styles.fieldError}>
                       {fieldErrors.custom}
                     </p>
-                  ) : (
-                    <p id="custom-rule-hint" className={styles.hint}>
-                      An iCalendar RRULE. The time below replaces any hour in
-                      the rule.
-                    </p>
-                  )}
+                  ) : null}
                 </div>
               ) : null}
-              <div className={styles.whenRow}>
-                <div className={styles.field}>
-                  <label htmlFor="time">Time</label>
-                  <input
-                    id="time"
-                    type="time"
-                    value={time}
-                    onChange={(event) => setTime(event.target.value)}
-                    required
+              {lockedRule ? null : (
+                <div className={styles.whenRow}>
+                  <div className={styles.field}>
+                    <label htmlFor="time">Time</label>
+                    <input
+                      id="time"
+                      type="time"
+                      value={time}
+                      onChange={(event) => setTime(event.target.value)}
+                      required
+                    />
+                  </div>
+                  <TimeZoneField
+                    id="timezone"
+                    value={timezone}
+                    onChange={setTimezone}
+                    error={fieldErrors.timezone}
                   />
                 </div>
-                <TimeZoneField
-                  id="timezone"
-                  value={timezone}
-                  onChange={setTimezone}
-                  error={fieldErrors.timezone}
-                />
-              </div>
+              )}
 
               <div className={styles.summary} data-testid="schedule-summary">
                 <RepeatIcon />
