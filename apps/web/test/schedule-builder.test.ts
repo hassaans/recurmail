@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCustomRule,
   type CustomRule,
+  canonicalTimeZoneId,
   customFromRule,
   defaultCustomRule,
   describeCustomRule,
@@ -13,8 +14,10 @@ import {
   findTimeZoneOption,
   groupTimeZones,
   repeatFromRule,
+  timeZoneLabel,
   timeZoneOptions,
 } from "../lib/schedule-editor";
+import { LEGACY_ZONE_IDS } from "../lib/time-zone-aliases";
 
 // 2026-10-15T04:20Z is Thursday 09:20 in Karachi.
 const now = new Date("2026-10-15T04:20:00Z");
@@ -470,21 +473,41 @@ describe("time zone search aliases", () => {
     expect(first("Beijing")).toBe("Asia/Shanghai");
   });
 
-  it("keeps every runtime zone reachable and finds legacy twins", () => {
+  it("keeps every runtime zone reachable under its canonical id", () => {
     const runtime = Intl.supportedValuesOf("timeZone");
-    expect(options.length).toBeGreaterThanOrEqual(runtime.length);
+    const canonical = new Set(runtime.map(canonicalTimeZoneId));
+    expect(options.length).toBeGreaterThanOrEqual(canonical.size);
     for (const id of runtime) {
       expect(filterTimeZones(options, id).map((option) => option.id)).toContain(
-        id,
+        canonicalTimeZoneId(id),
       );
     }
-    expect(findTimeZoneOption(options, "Asia/Kolkata")?.id).toMatch(
-      /^Asia\/(Kolkata|Calcutta)$/,
+    expect(findTimeZoneOption(options, "Asia/Kolkata")?.id).toBe(
+      "Asia/Kolkata",
     );
-    expect(findTimeZoneOption(options, "Asia/Calcutta")?.id).toMatch(
-      /^Asia\/(Kolkata|Calcutta)$/,
+    expect(findTimeZoneOption(options, "Asia/Calcutta")?.id).toBe(
+      "Asia/Kolkata",
     );
     expect(findTimeZoneOption(options, "Mars/Olympus")).toBeUndefined();
+  });
+
+  it("lists every zone under its canonical id with no legacy duplicates", () => {
+    const listed = new Set(options.map((option) => option.id));
+    expect(listed.size).toBe(options.length);
+    for (const [legacy, canonical] of Object.entries(LEGACY_ZONE_IDS)) {
+      expect(listed.has(legacy), legacy).toBe(false);
+      expect(listed.has(canonical), canonical).toBe(true);
+    }
+    expect(
+      timeZoneLabel(findTimeZoneOption(options, "Asia/Calcutta")?.id ?? "", at),
+    ).toBe("India Time (Asia/Kolkata), UTC+5:30");
+    expect(findTimeZoneOption(options, "Europe/Kiev")?.id).toBe("Europe/Kyiv");
+    expect(findTimeZoneOption(options, "Asia/Saigon")?.id).toBe(
+      "Asia/Ho_Chi_Minh",
+    );
+    expect(findTimeZoneOption(options, "America/Buenos_Aires")?.id).toBe(
+      "America/Argentina/Buenos_Aires",
+    );
   });
 
   it("groups the current and browser zones first, then common, then all", () => {

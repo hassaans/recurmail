@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
+  canonicalTimeZoneId,
   ensureTimeZoneOption,
   filterTimeZones,
   groupTimeZones,
@@ -26,9 +27,11 @@ interface ListItem {
   key: string;
 }
 
-function browserTimeZone(): string | null {
+/** The browser's zone under its canonical id, or null when it has none. */
+export function browserTimeZone(): string | null {
   try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? null;
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return zone ? canonicalTimeZoneId(zone) : null;
   } catch {
     return null;
   }

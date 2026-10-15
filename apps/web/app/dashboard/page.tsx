@@ -4,8 +4,12 @@ import { redirect } from "next/navigation";
 import AppShell from "../../components/AppShell";
 import ConfirmForm from "../../components/ConfirmForm";
 import controls from "../../components/controls.module.css";
+import DashboardNotices, {
+  type DashboardNotice,
+} from "../../components/DashboardNotices";
 import ScheduleList from "../../components/ScheduleList";
 import { configuredRuntime } from "../../lib/runtime";
+import { finishedInfo } from "../../lib/schedule-finished";
 import {
   type ScheduleSummary,
   summarizeSchedule,
@@ -18,15 +22,28 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-const gmailMessages: Record<string, string> = {
-  denied:
-    "Gmail permission was declined. RecurMail needs permission to send your scheduled emails. It cannot read your inbox. You can try again when you are ready.",
-  failed:
-    "Gmail could not be connected. Please try again and use the same Google account you used to sign in.",
-  connected: "Gmail is connected. RecurMail can send your scheduled emails.",
-  disconnected: "Gmail is disconnected. All your schedules are paused.",
-  disconnect_failed:
-    "Disconnect could not finish. Please try again. Your Gmail connection will stay here until Google revocation and removal are complete.",
+// A completed action reads as a success; a declined or failed one as a warning.
+const gmailMessages: Record<string, DashboardNotice> = {
+  denied: {
+    tone: "warn",
+    text: "Gmail permission was declined. RecurMail needs permission to send your scheduled emails. It cannot read your inbox. You can try again when you are ready.",
+  },
+  failed: {
+    tone: "warn",
+    text: "Gmail could not be connected. Please try again and use the same Google account you used to sign in.",
+  },
+  connected: {
+    tone: "success",
+    text: "Gmail is connected. RecurMail can send your scheduled emails.",
+  },
+  disconnected: {
+    tone: "success",
+    text: "Gmail is disconnected. All your schedules are paused.",
+  },
+  disconnect_failed: {
+    tone: "warn",
+    text: "Disconnect could not finish. Please try again. Your Gmail connection will stay here until Google revocation and removal are complete.",
+  },
 };
 
 type SearchParams = {
@@ -78,20 +95,60 @@ export default async function Dashboard({
     );
     if (response.ok) {
       const result = (await response.json()) as { schedules?: ScheduleRow[] };
-      schedules = (result.schedules ?? []).map(summarizeSchedule);
+      const now = new Date();
+      // Only a finished COUNT schedule needs its send log, to say how many of
+      // its sends went out. Everything else is derived from the row itself.
+      const sentCount = async (id: string): Promise<number | null> => {
+        const history = await runtime.schedules.history(
+          new Request(
+            `http://dashboard.internal/api/schedules/${encodeURIComponent(id)}/history`,
+            { headers: requestHeaders },
+          ),
+          id,
+        );
+        if (!history.ok) {
+          console.error(
+            "[ERROR] dashboard_sent_count_failed",
+            id,
+            history.status,
+          );
+          return null;
+        }
+        const entries = (await history.json()) as {
+          history?: { status: string }[];
+        };
+        return (entries.history ?? []).filter(
+          (entry) => entry.status === "sent",
+        ).length;
+      };
+      schedules = await Promise.all(
+        (result.schedules ?? []).map(async (row) => {
+          const finished = finishedInfo(row, now);
+          return summarizeSchedule(
+            row,
+            finished?.kind === "count"
+              ? { ...finished, sent: await sentCount(row.id) }
+              : finished,
+          );
+        }),
+      );
     } else {
       console.error("[ERROR] dashboard_schedules_list_failed", response.status);
       loadError = true;
     }
   }
 
-  const notices: string[] = [];
+  const notices: DashboardNotice[] = [];
   const gmailMessage = params.gmail ? gmailMessages[params.gmail] : undefined;
   if (gmailMessage) notices.push(gmailMessage);
   if (params.auth === "failed")
-    notices.push("Google sign-in could not finish. Please try again.");
-  if (params.saved === "1") notices.push("Schedule saved.");
-  if (params.warning) notices.push(params.warning);
+    notices.push({
+      tone: "warn",
+      text: "Google sign-in could not finish. Please try again.",
+    });
+  if (params.saved === "1")
+    notices.push({ tone: "success", text: "Schedule saved." });
+  if (params.warning) notices.push({ tone: "warn", text: params.warning });
   const unavailable =
     state.kind === "unavailable" || params.auth === "unavailable";
 
@@ -121,13 +178,7 @@ export default async function Dashboard({
           </div>
         </header>
       )}
-      {notices.length ? (
-        <div className={styles.status} role="status">
-          {notices.map((notice) => (
-            <p key={notice}>{notice}</p>
-          ))}
-        </div>
-      ) : null}
+      {notices.length ? <DashboardNotices notices={notices} /> : null}
       {unavailable ? (
         <p className={controls.error} role="alert">
           Your connection is unavailable right now. Please try again later.

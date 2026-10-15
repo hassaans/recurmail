@@ -410,6 +410,73 @@ test.describe("browser time zone", () => {
   });
 });
 
+test.describe("browser with a legacy time zone id", () => {
+  // Chromium still reports some zones under their old names. The picker shows
+  // and saves the current IANA id instead.
+  test.use({ timezoneId: "Asia/Calcutta" });
+
+  test("new schedules default to the canonical id and saved legacy ids load as canonical", async ({
+    page,
+  }) => {
+    await page.goto("/schedules/new");
+    const picker = page.getByRole("combobox", { name: "Time zone" });
+    await expect(picker).toHaveValue("India Time (Asia/Kolkata), UTC+5:30");
+    await expect(page.getByTestId("schedule-summary")).toContainText(
+      "India Time",
+    );
+    await expect(page.locator("main")).not.toContainText("Calcutta");
+    await page.getByRole("textbox", { name: "To" }).fill("in@example.test");
+    await page.getByLabel("Subject").fill("Kolkata default");
+    await page.getByRole("textbox", { name: "Message" }).fill("Namaste");
+    await page.getByRole("button", { name: "Save schedule" }).click();
+    await expect(page).toHaveURL(/\/dashboard\?saved=1/);
+    const saved = await browserRequest<{ schedules: ScheduleRow[] }>(
+      page,
+      "/api/schedules",
+    );
+    expect(saved.body.schedules).toHaveLength(1);
+    expect(saved.body.schedules[0].timezone).toBe("Asia/Kolkata");
+
+    // The saved notice has the success look and closes on its own.
+    const notice = page
+      .getByRole("main")
+      .getByRole("status")
+      .filter({ hasText: "Schedule saved." });
+    await expect(notice).toBeVisible();
+    await expect(notice.getByRole("button", { name: "Dismiss" })).toBeVisible();
+    await expect(notice).toHaveCount(0, { timeout: 10000 });
+
+    // A schedule saved under the old id (the API still accepts it) opens and
+    // saves under the current one.
+    const legacy = await browserRequest<ForecastResponse>(
+      page,
+      "/api/schedules",
+      "POST",
+      {
+        subject: "Saigon standup",
+        body_text: "Legacy zone",
+        to: ["vn@example.test"],
+        rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;BYSECOND=0",
+        timezone: "Asia/Saigon",
+      },
+    );
+    expect(legacy.status).toBe(201);
+    expect(legacy.body.schedule.timezone).toBe("Asia/Saigon");
+    await page.goto(`/schedules/${legacy.body.schedule.id}/edit`);
+    await expect(picker).toHaveValue(/\(Asia\/Ho_Chi_Minh\), UTC\+7$/);
+    await expect(page.locator("main")).not.toContainText("Asia/Saigon");
+    await page.getByLabel("Subject").fill("Ho Chi Minh City standup");
+    await page.getByRole("button", { name: "Save schedule" }).click();
+    await expect(page).toHaveURL(/\/dashboard\?saved=1/);
+    const reread = await browserRequest<{ schedule: ScheduleRow }>(
+      page,
+      `/api/schedules/${legacy.body.schedule.id}`,
+    );
+    expect(reread.body.schedule.timezone).toBe("Asia/Ho_Chi_Minh");
+    expect(reread.body.schedule.subject).toBe("Ho Chi Minh City standup");
+  });
+});
+
 test("recipient chips commit on comma and Enter, flag bad addresses and remove with Backspace", async ({
   page,
 }) => {
@@ -1082,11 +1149,11 @@ test.describe("time zone picker", () => {
       ["Lahore", /Asia\/Karachi/],
       ["Islamabad", /Asia\/Karachi/],
       ["Pakistan", /Asia\/Karachi/],
-      ["IST", /Asia\/(Kolkata|Calcutta)/],
-      ["Mumbai", /Asia\/(Kolkata|Calcutta)/],
-      ["Delhi", /Asia\/(Kolkata|Calcutta)/],
-      ["Bangalore", /Asia\/(Kolkata|Calcutta)/],
-      ["India", /Asia\/(Kolkata|Calcutta)/],
+      ["IST", /Asia\/Kolkata/],
+      ["Mumbai", /Asia\/Kolkata/],
+      ["Delhi", /Asia\/Kolkata/],
+      ["Bangalore", /Asia\/Kolkata/],
+      ["India", /Asia\/Kolkata/],
       ["EST", /America\/New_York/],
       ["EDT", /America\/New_York/],
       ["PST", /America\/Los_Angeles/],
