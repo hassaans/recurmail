@@ -1,6 +1,11 @@
 import { type BrowserContext, expect, type Page } from "@playwright/test";
 import type { ScheduleRow } from "../apps/web/lib/schedules";
-import { fakeSupabaseUrl, test, testSessionCookie } from "./fixtures/auth";
+import {
+  appOrigin,
+  fakeSupabaseUrl,
+  test,
+  testSessionCookie,
+} from "./fixtures/auth";
 
 // Feedback for every schedule action, driven by real clicks: a confirmation
 // before pause-all, a pending label on the clicked control, a status message
@@ -399,7 +404,7 @@ test.describe("disconnect", () => {
     await expect(dialog.getByRole("alert")).toHaveCount(0);
     release();
     await expect(page).toHaveURL(
-      `http://127.0.0.1:3100/dashboard?gmail=disconnected&email=${encodeURIComponent(scenario.owner.email)}`,
+      `${appOrigin}/dashboard?gmail=disconnected&email=${encodeURIComponent(scenario.owner.email)}`,
     );
     await expect(
       status(page, `Disconnected ${scenario.owner.email}.`),
