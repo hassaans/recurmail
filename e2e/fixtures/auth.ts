@@ -3,7 +3,11 @@ import { test as base, expect } from "@playwright/test";
 
 // Explicitly synthetic test key and credentials, never deployment credentials.
 export const testEncryptionKey = Buffer.alloc(32, 7).toString("base64");
-export const fakeSupabaseUrl = "http://127.0.0.1:3101";
+// Ports default to 3100/3101 (CI). Set both to run a second copy side by side.
+export const webPort = process.env.RECURMAIL_E2E_WEB_PORT?.trim() || "3100";
+export const fakePort = process.env.RECURMAIL_E2E_FAKE_PORT?.trim() || "3101";
+export const appOrigin = `http://127.0.0.1:${webPort}`;
+export const fakeSupabaseUrl = `http://127.0.0.1:${fakePort}`;
 
 export function testSessionCookie(
   accessToken: string,
@@ -34,7 +38,7 @@ export function testSessionCookie(
       cipher.getAuthTag().toString("base64url"),
       ciphertext.toString("base64url"),
     ].join("."),
-    url: "http://127.0.0.1:3100",
+    url: appOrigin,
     httpOnly: true,
     sameSite: "Lax" as const,
   };

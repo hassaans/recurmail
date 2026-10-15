@@ -632,6 +632,59 @@
   background: var(--rm-bg-2);
 }
 
+/* "Send me a test" sits at the foot of the Email card, below the message. A
+   "From" field can be added above the message without moving it. */
+.testSend {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.testSendRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  min-width: 0;
+}
+.testSendButton {
+  gap: 10px;
+  flex: none;
+}
+.testSendButton[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.testSendButton[aria-disabled="true"]:hover {
+  background: var(--rm-paper);
+}
+.testSendButton .spinner {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+.testSendHint {
+  flex: 1 1 240px;
+  min-width: 0;
+  margin: 0;
+  color: var(--rm-muted);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.testSendHint strong {
+  color: var(--rm-ink);
+  font-weight: 600;
+}
+.testSendError {
+  margin: 0;
+  color: var(--rm-danger-ink);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.testSendError a {
+  color: var(--rm-grape-dark);
+  font-weight: 600;
+}
+
 .main a:focus-visible,
 .main button:focus-visible {
   outline: 3px solid #6d3bef;

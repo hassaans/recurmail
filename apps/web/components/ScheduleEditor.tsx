@@ -36,6 +36,7 @@ import RecipientField, {
 } from "./RecipientField";
 import styles from "./ScheduleEditor.module.css";
 import TimeZoneField, { browserTimeZone } from "./TimeZoneField";
+import Toast, { type ToastMessage } from "./Toast";
 
 interface ExistingSchedule {
   subject: string;
@@ -233,8 +234,14 @@ function DayChips({
 
 export default function ScheduleEditor({
   scheduleId,
+  userEmail,
+  senderEmail,
 }: {
   scheduleId?: string;
+  /** The signed-in account; the only address a test email ever goes to. */
+  userEmail: string;
+  /** The connected Gmail address a test is sent from, or null when none is connected. */
+  senderEmail: string | null;
 }) {
   const router = useRouter();
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -264,6 +271,13 @@ export default function ScheduleEditor({
   const [warning, setWarning] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [messageEmpty, setMessageEmpty] = useState(true);
+  const [testing, setTesting] = useState(false);
+  const [testError, setTestError] = useState<{
+    text: string;
+    reconnect: boolean;
+  } | null>(null);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
+  const dismissToast = useCallback(() => setToast(null), []);
   const [activeFormats, setActiveFormats] = useState<
     Partial<Record<FormatCommand, boolean>>
   >({});
@@ -647,6 +661,64 @@ export default function ScheduleEditor({
     }
   }
 
+  // A test email goes to the signed-in user only, never to the recipients above.
+  const testHint = !senderEmail
+    ? "Connect Gmail to send yourself a test."
+    : !subject.trim() || messageEmpty
+      ? "Add a subject and a message first."
+      : null;
+  const canSendTest = testHint === null && !testing;
+
+  async function sendTest() {
+    if (!canSendTest) return;
+    setTestError(null);
+    setToast(null);
+    setTesting(true);
+    // Exactly what save would send: the current draft, unsaved edits included.
+    const payload = {
+      subject,
+      body_text: bodyRef.current?.innerText ?? "",
+      body_html: bodyRef.current?.innerHTML ?? "",
+    };
+    try {
+      const response = await fetch("/api/schedules/test", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        const code: unknown = result?.error?.code;
+        const message =
+          typeof result?.error?.message === "string"
+            ? result.error.message
+            : "Could not send the test email";
+        if (
+          code === "gmail_reconnect_required" ||
+          code === "gmail_not_connected"
+        )
+          setTestError({ text: message, reconnect: true });
+        else if (code === "rate_limited")
+          setTestError({ text: message, reconnect: false });
+        else setToast({ tone: "error", text: message });
+        return;
+      }
+      setToast({
+        tone: "success",
+        text: `Test sent to ${result.sent_to}. Check your inbox.`,
+      });
+    } catch {
+      console.error("[ERROR] test_send_request_failed");
+      setToast({
+        tone: "error",
+        text: "Could not send the test email. Check your connection and try again.",
+      });
+    } finally {
+      setTesting(false);
+    }
+  }
+
   const firstSend = nextSends[0] ? sendTimeParts(nextSends[0], timezone) : null;
 
   return (
@@ -818,6 +890,53 @@ export default function ScheduleEditor({
               {fieldErrors.message ? (
                 <p id="message-error" className={styles.fieldError}>
                   {fieldErrors.message}
+                </p>
+              ) : null}
+            </div>
+            <div className={styles.testSend} data-testid="test-send">
+              <div className={styles.testSendRow}>
+                <button
+                  type="button"
+                  className={`${styles.secondary} ${styles.testSendButton}`}
+                  onClick={sendTest}
+                  disabled={testing}
+                  aria-disabled={canSendTest ? undefined : true}
+                  aria-busy={testing || undefined}
+                  aria-describedby="test-send-hint"
+                >
+                  {testing ? (
+                    <>
+                      <span className={styles.spinner} aria-hidden="true" />
+                      Sending…
+                    </>
+                  ) : (
+                    "Send me a test"
+                  )}
+                </button>
+                <p id="test-send-hint" className={styles.testSendHint}>
+                  {senderEmail ? (
+                    <>
+                      We&apos;ll send it to you at <strong>{userEmail}</strong>{" "}
+                      from <strong>{senderEmail}</strong>.
+                    </>
+                  ) : null}
+                  {testHint ? (
+                    <>
+                      {senderEmail ? " " : ""}
+                      {testHint}
+                    </>
+                  ) : null}
+                </p>
+              </div>
+              {testError ? (
+                <p className={styles.testSendError} role="alert">
+                  {testError.text}
+                  {testError.reconnect ? (
+                    <>
+                      {" "}
+                      <a href="/dashboard">Reconnect Gmail</a>
+                    </>
+                  ) : null}
                 </p>
               ) : null}
             </div>
@@ -1310,6 +1429,7 @@ export default function ScheduleEditor({
           </div>
         </form>
       )}
+      <Toast message={toast} onDismiss={dismissToast} />
     </div>
   );
 }

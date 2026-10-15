@@ -1,5 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
-import { fakeSupabaseUrl, testEncryptionKey } from "./fixtures/auth";
+import {
+  appOrigin,
+  fakePort,
+  fakeSupabaseUrl,
+  testEncryptionKey,
+  webPort,
+} from "./fixtures/auth";
 
 export default defineConfig({
   testDir: ".",
@@ -8,7 +14,7 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   use: {
-    baseURL: "http://127.0.0.1:3100",
+    baseURL: appOrigin,
     trace: "retain-on-failure",
   },
   projects: [
@@ -22,14 +28,19 @@ export default defineConfig({
       command: "node fixtures/supabase.mjs",
       url: `${fakeSupabaseUrl}/health`,
       reuseExistingServer: false,
+      env: {
+        RECURMAIL_E2E_WEB_PORT: webPort,
+        RECURMAIL_E2E_FAKE_PORT: fakePort,
+      },
     },
     {
       command: "node fixtures/web-server.mjs",
-      url: "http://127.0.0.1:3100",
+      url: appOrigin,
       reuseExistingServer: false,
       timeout: 120_000,
       env: {
-        APP_URL: "http://127.0.0.1:3100",
+        RECURMAIL_E2E_WEB_PORT: webPort,
+        APP_URL: appOrigin,
         SUPABASE_URL: fakeSupabaseUrl,
         SUPABASE_PUBLISHABLE_KEY: "fake-publishable-key",
         SUPABASE_SECRET_KEY: "fake-secret-key",
@@ -38,6 +49,7 @@ export default defineConfig({
         TOKEN_ENCRYPTION_KEY: testEncryptionKey,
         ADMIN_EMAILS: "admin@example.test",
         RECURMAIL_TEST_OAUTH_ORIGIN: fakeSupabaseUrl,
+        RECURMAIL_TEST_GMAIL_ORIGIN: fakeSupabaseUrl,
       },
     },
   ],

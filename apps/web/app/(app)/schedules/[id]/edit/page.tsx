@@ -26,7 +26,11 @@ export default async function EditSchedulePage({
     redirect("/dashboard");
   return (
     <AppShell email={state.user.email} active="schedules">
-      <ScheduleEditor scheduleId={id} />
+      <ScheduleEditor
+        scheduleId={id}
+        userEmail={state.user.email}
+        senderEmail={state.connection?.google_email ?? null}
+      />
     </AppShell>
   );
 }
