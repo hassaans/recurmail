@@ -24,6 +24,22 @@ export function createStore(
     }
     return (await response.json()) as T;
   }
+  async function rpcVoid(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<void> {
+    const response = await fetcher(`${base}/rpc/${name}`, {
+      method: "POST",
+      headers: {
+        apikey: secretKey,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(args),
+    });
+    if (!response.ok) {
+      throw new Error(`Supabase RPC ${name} failed (${response.status})`);
+    }
+  }
   async function failureMetrics() {
     const result = await rpc<{
       failed_last_hour: number;
@@ -42,10 +58,10 @@ export function createStore(
     claimReconnectNotices: (limit) =>
       rpc("claim_reconnect_email_outbox", { p_limit: limit }),
     markReconnectNoticeSent: async (id) => {
-      await rpc("mark_reconnect_email_sent", { p_notice_id: id });
+      await rpcVoid("mark_reconnect_email_sent", { p_notice_id: id });
     },
     markReconnectNoticeFailed: async (id, errorCode) => {
-      await rpc("mark_reconnect_email_failed", {
+      await rpcVoid("mark_reconnect_email_failed", {
         p_notice_id: id,
         p_error_code: errorCode,
       });
@@ -53,14 +69,14 @@ export function createStore(
     reclaimStaleSending: (olderThan) =>
       rpc("reclaim_stale_sending", { p_older_than: olderThan }),
     recordFailure: async (input) => {
-      await rpc("record_sender_failure", {
+      await rpcVoid("record_sender_failure", {
         p_schedule_id: input.scheduleId,
         p_scheduled_for: input.scheduledFor,
         p_error_code: input.errorCode,
       });
     },
     complete: async (input) => {
-      await rpc("complete_due_schedule", {
+      await rpcVoid("complete_due_schedule", {
         p_schedule_id: input.scheduleId,
         p_scheduled_for: input.scheduledFor,
         p_status: input.status,
@@ -70,7 +86,7 @@ export function createStore(
       });
     },
     reconnect: async (input) => {
-      await rpc("mark_gmail_reconnect_needed", {
+      await rpcVoid("mark_gmail_reconnect_needed", {
         p_schedule_id: input.scheduleId,
         p_user_id: input.userId,
         p_scheduled_for: input.scheduledFor,
