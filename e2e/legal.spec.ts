@@ -57,7 +57,7 @@ test("legal pages use the shared brand header and edge-to-edge page background",
       const nav = page.getByRole("navigation", { name: "Main navigation" });
       const login = nav.getByRole("link", { name: "Log in", exact: true });
       const signup = nav.getByRole("link", {
-        name: "Create free account",
+        name: width > 860 ? "Create free account" : "Sign up free",
         exact: true,
       });
       await expect(login).toBeVisible();

@@ -1,4 +1,6 @@
 import BrandMark from "./BrandMark";
+import { type HeaderLink, HeaderMenu } from "./HeaderMenu";
+import styles from "./SiteHeader.module.css";
 
 type SiteHeaderProps =
   | { variant: "home" }
@@ -13,47 +15,44 @@ const guideLinks = {
   extension: { href: "/guides/recurring-email-gmail", label: "Gmail guide" },
 };
 
+function sectionLinks(props: SiteHeaderProps): HeaderLink[] {
+  if (props.variant === "legal") return [];
+  const home = props.variant === "home" ? "" : "/";
+  return [
+    { href: `${home}#how-it-works`, label: "How it works" },
+    { href: `${home}#faq`, label: "FAQ" },
+    ...(props.variant === "guide" ? [guideLinks[props.relatedGuide]] : []),
+  ];
+}
+
+const login: HeaderLink = { href: "/dashboard", label: "Log in" };
+
 export function SiteHeader(props: SiteHeaderProps) {
-  const isLegal = props.variant === "legal";
-  const isHome = props.variant === "home";
+  const links = sectionLinks(props);
+  // With nothing but Log in to show, a menu would hold one item, so Log in
+  // stays in the row at every width instead.
+  const menu = links.length > 0;
 
   return (
-    <header className={`site-header wrap${isLegal ? " legal-header" : ""}`}>
-      <nav className="nav" aria-label="Main navigation">
-        <a className="logo" href="/" aria-label="RecurMail home">
+    <header className={`${styles.header} wrap`}>
+      <nav className={styles.nav} aria-label="Main navigation">
+        <a className={styles.logo} href="/" aria-label="RecurMail home">
           <BrandMark />
           RecurMail
         </a>
-        <ul className="nav-links">
-          {isLegal ? null : (
-            <>
-              <li>
-                <a href={isHome ? "#how-it-works" : "/#how-it-works"}>
-                  How it works
-                </a>
-              </li>
-              <li>
-                <a href={isHome ? "#faq" : "/#faq"}>FAQ</a>
-              </li>
-              {props.variant === "guide" ? (
-                <li>
-                  <a href={guideLinks[props.relatedGuide].href}>
-                    {guideLinks[props.relatedGuide].label}
-                  </a>
-                </li>
-              ) : null}
-            </>
-          )}
-          <li>
-            <a className="nav-login" href="/dashboard">
-              Log in
-            </a>
-          </li>
+        {/* Desktop: the links sit in the row. Up to 860px they move into the menu. */}
+        <ul className={menu ? styles.links : `${styles.links} ${styles.inRow}`}>
+          {[...links, login].map((link) => (
+            <li key={link.href}>
+              <a href={link.href}>{link.label}</a>
+            </li>
+          ))}
         </ul>
-        {/* Outside the list so phones can keep it on the logo's row. */}
-        <a className="nav-primary" href="/auth/signin">
-          Create free account
+        <a className={styles.cta} href="/auth/signin">
+          <span className={styles.ctaLong}>Create free account</span>
+          <span className={styles.ctaShort}>Sign up free</span>
         </a>
+        {menu ? <HeaderMenu links={[...links, login]} /> : null}
       </nav>
     </header>
   );
