@@ -24,6 +24,7 @@ function idToken(claims: Record<string, unknown> = {}, clientId = "id") {
     iss: "https://accounts.google.com",
     aud: clientId,
     exp: Math.floor(now / 1000) + 3600,
+    sub: "google-owner-sub",
     email: "owner@gmail.com",
     email_verified: true,
     ...claims,
@@ -199,6 +200,7 @@ describe("separate Gmail OAuth provider", () => {
       ),
     ).toEqual({
       refreshToken: "fake-refresh",
+      sub: "google-owner-sub",
       email: "owner@gmail.com",
       isWorkspace: false,
     });
@@ -232,7 +234,12 @@ describe("separate Gmail OAuth provider", () => {
       );
       expect(
         await google.exchangeCode("code", "https://app.test/cb", "verifier"),
-      ).toEqual({ refreshToken: "fake-refresh", email, isWorkspace });
+      ).toEqual({
+        refreshToken: "fake-refresh",
+        sub: "google-owner-sub",
+        email,
+        isWorkspace,
+      });
     },
   );
 
@@ -300,6 +307,8 @@ describe("separate Gmail OAuth provider", () => {
       { status: 200, body: grant({ email_verified: false }) },
     ],
     ["a missing address", { status: 200, body: grant({ email: undefined }) }],
+    ["a missing subject", { status: 200, body: grant({ sub: undefined }) }],
+    ["an empty subject", { status: 200, body: grant({ sub: "" }) }],
     [
       "a malformed ID token",
       { status: 200, body: grant({}, "id", { id_token: "not-a-jwt" }) },
@@ -445,9 +454,27 @@ describe("separate Gmail OAuth provider", () => {
         "id",
         now,
       ),
-    ).toEqual({ email: "team@company.test", isWorkspace: true });
+    ).toEqual({
+      sub: "google-owner-sub",
+      email: "team@company.test",
+      isWorkspace: true,
+    });
     expect(grantedAccountFromIdToken(undefined, "id", now)).toBeNull();
     expect(grantedAccountFromIdToken(42, "id", now)).toBeNull();
+    // The subject is Google's stable account id: required, at most 255
+    // printable ASCII characters (OpenID Connect Core 2).
+    expect(
+      grantedAccountFromIdToken(idToken({ sub: 1234567890 }), "id", now),
+    ).toBeNull();
+    expect(
+      grantedAccountFromIdToken(idToken({ sub: "s".repeat(256) }), "id", now),
+    ).toBeNull();
+    expect(
+      grantedAccountFromIdToken(idToken({ sub: "with space" }), "id", now),
+    ).toBeNull();
+    expect(
+      grantedAccountFromIdToken(idToken({ sub: "s".repeat(255) }), "id", now),
+    ).toMatchObject({ sub: "s".repeat(255) });
     expect(
       grantedAccountFromIdToken(
         idToken({ email: `${"a".repeat(250)}@x.test` }),

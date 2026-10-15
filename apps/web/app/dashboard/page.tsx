@@ -46,6 +46,13 @@ function gmailMessage(
         tone: "warn",
         text: `You can connect up to ${MAX_GMAIL_CONNECTIONS} Gmail accounts. Disconnect one to add another.`,
       };
+    case "address_in_use":
+      return {
+        tone: "warn",
+        text: email
+          ? `${email} is already connected here as a different Google account. Disconnect that one first if you want to replace it.`
+          : "That address is already connected here as a different Google account. Disconnect that one first if you want to replace it.",
+      };
     case "connected":
       return {
         tone: "success",

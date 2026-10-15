@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ConnectionAddressConflictError,
   ConnectionLimitError,
   type ConnectionStore,
   MAX_GMAIL_CONNECTIONS,
@@ -76,11 +77,18 @@ function fixture() {
       own(userId).map((connection) => connection.encrypted_refresh_token),
     ),
     save: vi.fn(async (row) => {
+      // The same rules as the real store: the account id names the row, and
+      // an address already held by a different account is refused.
       const wanted = row.google_email.toLowerCase();
-      const existing = own(row.user_id).find(
-        (connection) => connection.google_email.toLowerCase() === wanted,
-      );
+      const mine = own(row.user_id);
+      const existing =
+        mine.find((connection) => connection.google_sub === row.google_sub) ??
+        mine.find(
+          (connection) => connection.google_email.toLowerCase() === wanted,
+        );
       if (existing) {
+        if (existing.google_sub !== row.google_sub)
+          throw new ConnectionAddressConflictError();
         Object.assign(existing, row);
         return;
       }
@@ -101,9 +109,16 @@ function fixture() {
     }),
   };
   // Google tells the callback which account granted the permission; the
-  // fixture starts with the sign-in account and tests swap in others.
-  const granted = (email: string, refreshToken = "fake-gmail-refresh") => ({
+  // fixture starts with the sign-in account and tests swap in others. The
+  // account id follows the address unless a test says otherwise.
+  const subFor = (email: string) => `google-sub-${email.toLowerCase()}`;
+  const granted = (
+    email: string,
+    refreshToken = "fake-gmail-refresh",
+    sub = subFor(email),
+  ) => ({
     refreshToken,
+    sub,
     email,
     isWorkspace: isWorkspaceAddress(email),
   });
@@ -133,9 +148,15 @@ function fixture() {
     return { response, cookie, state, location };
   };
   // Runs the whole add flow for one granted account.
-  const connect = async (email: string, refreshToken?: string) => {
+  const connect = async (
+    email: string,
+    refreshToken?: string,
+    sub?: string,
+  ) => {
     const { cookie, state } = await start();
-    google.exchangeCode.mockResolvedValueOnce(granted(email, refreshToken));
+    google.exchangeCode.mockResolvedValueOnce(
+      granted(email, refreshToken, sub),
+    );
     return handlers.callback(
       request(`/api/gmail/callback?state=${state}&code=fake-code`, cookie),
     );
@@ -145,6 +166,7 @@ function fixture() {
     start,
     connect,
     granted,
+    subFor,
     store,
     google,
     authenticate,
@@ -357,6 +379,77 @@ describe("Gmail connection HTTP flow with fake providers and persistence", () =>
       google_email: work,
       status: "connected",
     });
+  });
+
+  it("keeps the same connection and its schedules when Google reports the account under a new address", async () => {
+    const f = fixture();
+    await f.connect(owner.email);
+    await f.connect(work);
+    f.needsReconnect(ids.personal);
+    const { cookie, state } = await f.start(ids.personal);
+    // Same Google account id, new address, fresh token.
+    f.google.exchangeCode.mockResolvedValueOnce(
+      f.granted("new-name@gmail.com", "fake-refresh-2", f.subFor(owner.email)),
+    );
+    const callback = await f.handlers.callback(
+      request(`/api/gmail/callback?state=${state}&code=fake-code`, cookie),
+    );
+    expect(callback.headers.get("location")).toBe(
+      `${origin}/dashboard?gmail=connected&email=new-name%40gmail.com`,
+    );
+    expect(f.connections).toHaveLength(2);
+    expect(f.connection()).toMatchObject({
+      google_email: "new-name@gmail.com",
+      google_sub: f.subFor(owner.email),
+      status: "connected",
+    });
+    expect(
+      decryptRefreshToken(
+        f.connection()?.encrypted_refresh_token ?? "",
+        key,
+        owner.id,
+      ),
+    ).toBe("fake-refresh-2");
+    expect(f.schedules.filter((row) => row.user_id === owner.id)).toEqual([
+      {
+        user_id: owner.id,
+        gmail_connection_id: ids.personal,
+        status: "active",
+      },
+      { user_id: owner.id, gmail_connection_id: ids.work, status: "active" },
+    ]);
+  });
+
+  it("refuses an address that a different Google account of the user's already holds, says which, and revokes the grant", async () => {
+    const f = fixture();
+    await f.connect(owner.email);
+    const callback = await f.connect(
+      "Owner@gmail.com",
+      "fake-refresh-other",
+      "google-sub-someone-else",
+    );
+    expect(callback.headers.get("location")).toBe(
+      `${origin}/dashboard?gmail=address_in_use&email=Owner%40gmail.com`,
+    );
+    expect(callback.headers.get("set-cookie")).toMatch(/rm_gmail_state=;/);
+    // The row that holds the address keeps its account, token and status.
+    expect(f.connections).toHaveLength(1);
+    expect(f.connection()).toMatchObject({
+      google_email: owner.email,
+      google_sub: f.subFor(owner.email),
+      status: "connected",
+    });
+    expect(
+      decryptRefreshToken(
+        f.connection()?.encrypted_refresh_token ?? "",
+        key,
+        owner.id,
+      ),
+    ).toBe("fake-gmail-refresh");
+    expect(f.google.revoke).toHaveBeenCalledWith("fake-refresh-other");
+    expect(console.error).not.toHaveBeenCalledWith(
+      "[ERROR] gmail_callback_failed",
+    );
   });
 
   it("ignores a reconnect id the user does not own and adds the granted account instead", async () => {

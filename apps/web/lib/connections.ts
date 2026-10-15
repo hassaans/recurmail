@@ -12,8 +12,13 @@ export interface PublicConnection {
   status: "connected" | "needs_reconnect" | "disconnected";
   connected_at: string;
 }
-/** A row to write. The database assigns the id. */
+/**
+ * A row to write. The database assigns the id. The Google account id is
+ * server-side only: it is never in PUBLIC_CONNECTION_COLUMNS and the
+ * authenticated role has no select grant on it.
+ */
 export interface StoredConnection extends Omit<PublicConnection, "id"> {
+  google_sub: string;
   encrypted_refresh_token: string;
 }
 export interface ConnectionCredential {
@@ -31,9 +36,14 @@ export interface ConnectionStore {
   /** Every encrypted token the user holds, for account deletion. */
   readEncryptedTokens(userId: string): Promise<string[]>;
   /**
-   * Inserts the account, or updates the token and status of the row that
-   * already holds the same address. Throws ConnectionLimitError when the
-   * user already has the maximum number of accounts.
+   * Inserts the account, or updates the row that already holds it. A row is
+   * the same account when it has the same Google account id, or when it has
+   * no id yet and the same address (a row written before ids were stored,
+   * which then gets its id filled in). The address on the matched row is
+   * refreshed, so a renamed account keeps its row and its schedules. Throws
+   * ConnectionLimitError when the user already has the maximum number of
+   * accounts, and ConnectionAddressConflictError when the address belongs to
+   * one of the user's rows that is a different Google account.
    */
   save(connection: StoredConnection): Promise<void>;
   pauseSchedules(userId: string, connectionId: string): Promise<void>;
@@ -43,6 +53,17 @@ export interface ConnectionStore {
 export class ConnectionLimitError extends Error {
   constructor() {
     super(`A user can connect at most ${MAX_GMAIL_CONNECTIONS} Gmail accounts`);
+  }
+}
+
+/**
+ * The address is already on one of the user's connections, and that row is a
+ * different Google account. Its token and schedules are left alone.
+ */
+export class ConnectionAddressConflictError extends Error {
+  readonly code = "address_in_use";
+  constructor() {
+    super("The address belongs to a different connected Google account");
   }
 }
 
@@ -171,36 +192,60 @@ export function createConnectionStore(config: {
       const ownRows = () =>
         rows(
           "gmail_connections",
-          { user_id: `eq.${connection.user_id}`, select: "id,google_email" },
+          {
+            user_id: `eq.${connection.user_id}`,
+            select: "id,google_email,google_sub",
+          },
           undefined,
           true,
         );
-      const sameAddress = (list: Record<string, unknown>[]) =>
-        list.find(
+      // The Google account id is the key. A row without one was written
+      // before ids were stored, so the same address claims it and the update
+      // fills the id in. An address held by a row with a different id is
+      // another Google account; that row keeps its token and schedules.
+      const sameAccount = (list: Record<string, unknown>[]) => {
+        const byId = list.find(
+          (row) => row.google_sub === connection.google_sub,
+        );
+        if (byId) return byId;
+        const byAddress = list.find(
           (row) =>
             typeof row.google_email === "string" &&
             row.google_email.toLowerCase() === wanted,
         );
-      const update = (id: unknown) =>
-        request(
-          "gmail_connections",
-          { id: `eq.${String(id)}`, user_id: `eq.${connection.user_id}` },
-          "PATCH",
-          undefined,
-          true,
-          {
-            google_email: connection.google_email,
-            is_workspace: connection.is_workspace,
-            encrypted_refresh_token: connection.encrypted_refresh_token,
-            status: connection.status,
-            connected_at: connection.connected_at,
-          },
-        );
-      // The address is unique per user ignoring case, so find the existing
-      // row by comparing lower-cased addresses rather than relying on an
-      // upsert, which cannot target an expression index through PostgREST.
+        if (byAddress && typeof byAddress.google_sub === "string")
+          throw new ConnectionAddressConflictError();
+        return byAddress;
+      };
+      const update = async (id: unknown) => {
+        try {
+          await request(
+            "gmail_connections",
+            { id: `eq.${String(id)}`, user_id: `eq.${connection.user_id}` },
+            "PATCH",
+            undefined,
+            true,
+            {
+              google_sub: connection.google_sub,
+              google_email: connection.google_email,
+              is_workspace: connection.is_workspace,
+              encrypted_refresh_token: connection.encrypted_refresh_token,
+              status: connection.status,
+              connected_at: connection.connected_at,
+            },
+          );
+        } catch (error) {
+          // The unique indexes refused the update: another of the user's rows
+          // already holds this address or this account id.
+          if (error instanceof ConnectionStorageError && error.status === 409)
+            throw new ConnectionAddressConflictError();
+          throw error;
+        }
+      };
+      // Neither index can be targeted by an upsert through PostgREST (one is
+      // an expression, the other is partial), so the match is done here.
       const existing = await ownRows();
-      const match = sameAddress(existing);
+      const match = sameAccount(existing);
       if (match) {
         await update(match.id);
         return;
@@ -217,13 +262,13 @@ export function createConnectionStore(config: {
           connection,
         );
       } catch (error) {
-        // Two consents for the same new address can both miss the lookup
+        // Two consents for the same new account can both miss the lookup
         // above. The unique index lets one insert through and answers the
         // other with a conflict. The account is present either way, so give
-        // the row that won this token instead of failing the second consent.
+        // the row that won this token, under the same matching rules.
         if (!(error instanceof ConnectionStorageError) || error.status !== 409)
           throw error;
-        const winner = sameAddress(await ownRows());
+        const winner = sameAccount(await ownRows());
         if (!winner) throw error;
         await update(winner.id);
       }

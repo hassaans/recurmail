@@ -1,7 +1,7 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(28);
+select plan(36);
 
 insert into auth.users (id, email, aud, role) values
   ('00000000-0000-4000-8000-000000000031', 'multi@example.test', 'authenticated', 'authenticated'),
@@ -102,10 +102,40 @@ select ok(has_function_privilege('service_role', 'public.mark_gmail_reconnect_ne
 select ok(not has_function_privilege('authenticated', 'public.mark_gmail_reconnect_needed(uuid, uuid, uuid, timestamptz, text, text)', 'EXECUTE'), 'authenticated cannot mark a connection for reconnect');
 select is((select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname = 'mark_gmail_reconnect_needed'), 1::bigint, 'only the per-connection reconnect function remains');
 
+-- The Google account id keys a connection. Rows from before the column
+-- existed have none, and any number of them may coexist; once set, an id is
+-- unique per user, while another user may hold the same id.
+select has_column('public', 'gmail_connections', 'google_sub', 'connections carry the Google account id');
+select col_is_null('public', 'gmail_connections', 'google_sub', 'the Google account id is nullable for rows from before it was stored');
+select lives_ok($$
+  insert into public.gmail_connections (id, user_id, google_email, is_workspace, encrypted_refresh_token, status, google_sub) values
+    ('40000000-0000-4000-8000-000000000034', '00000000-0000-4000-8000-000000000031', 'third@gmail.com', false, 'ciphertext-4', 'connected', 'google-sub-third'),
+    ('40000000-0000-4000-8000-000000000035', '00000000-0000-4000-8000-000000000031', 'fourth@gmail.com', false, 'ciphertext-5', 'connected', null),
+    ('40000000-0000-4000-8000-000000000036', '00000000-0000-4000-8000-000000000031', 'fifth@gmail.com', false, 'ciphertext-6', 'connected', null)
+$$, 'rows without a Google account id do not collide with each other');
+select throws_ok($$
+  insert into public.gmail_connections (user_id, google_email, is_workspace, encrypted_refresh_token, status, google_sub) values
+    ('00000000-0000-4000-8000-000000000031', 'renamed-third@gmail.com', false, 'ciphertext-7', 'connected', 'google-sub-third')
+$$, '23505', null, 'one row per Google account id per user');
+select throws_ok($$
+  update public.gmail_connections set google_sub = 'google-sub-third' where id = '40000000-0000-4000-8000-000000000035'
+$$, '23505', null, 'an existing row cannot take another row''s Google account id');
+insert into auth.users (id, email, aud, role) values
+  ('00000000-0000-4000-8000-000000000033', 'multi-third@example.test', 'authenticated', 'authenticated');
+select lives_ok($$
+  insert into public.gmail_connections (user_id, google_email, is_workspace, encrypted_refresh_token, status, google_sub) values
+    ('00000000-0000-4000-8000-000000000033', 'third-elsewhere@gmail.com', false, 'ciphertext-8', 'connected', 'google-sub-third')
+$$, 'another user may hold the same Google account id');
+select throws_ok($$
+  insert into public.gmail_connections (user_id, google_email, is_workspace, encrypted_refresh_token, status, google_sub) values
+    ('00000000-0000-4000-8000-000000000031', 'blank-sub@gmail.com', false, 'ciphertext-9', 'connected', '')
+$$, '23514', null, 'a blank Google account id is refused');
+
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000031', true);
 set local role authenticated;
-select is((select count(id) from public.gmail_connections), 1::bigint, 'the user reads the ids of their remaining connections');
+select is((select count(id) from public.gmail_connections), 4::bigint, 'the user reads the ids of their remaining connections');
 select is((select count(*) from public.schedules where gmail_connection_id = '40000000-0000-4000-8000-000000000032'), 2::bigint, 'the user reads which connection each schedule sends from');
+select throws_ok($$select google_sub from public.gmail_connections$$, '42501', null, 'the Google account id is hidden from the user, like the token');
 reset role;
 
 select * from finish(true);

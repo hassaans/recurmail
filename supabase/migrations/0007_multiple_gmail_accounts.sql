@@ -8,6 +8,18 @@ alter table public.gmail_connections
 create unique index gmail_connections_user_id_lower_email_key
   on public.gmail_connections (user_id, lower(google_email));
 
+-- Google's `sub` claim names the account for good; the address can change.
+-- Rows written before this migration have no sub, so the column is nullable
+-- and the callback fills it in the first time that address reconnects. The
+-- column is not in the authenticated select grant from 0002, so clients
+-- never read it.
+alter table public.gmail_connections add column google_sub text
+  constraint gmail_connections_google_sub_check
+  check (google_sub is null or length(google_sub) between 1 and 255);
+create unique index gmail_connections_user_id_google_sub_key
+  on public.gmail_connections (user_id, google_sub)
+  where google_sub is not null;
+
 -- At most 10 accounts per user. The advisory lock serialises concurrent
 -- inserts for the same user so two requests cannot both pass the count.
 create or replace function public.enforce_gmail_connection_cap()
