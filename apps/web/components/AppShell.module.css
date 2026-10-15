@@ -11,8 +11,12 @@
 .page *::after {
   box-sizing: border-box;
 }
-.page
-  :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+/* Zero specificity: a default ring that any control with its own focus style
+   (such as the recipient chip box or the time zone picker) can override. */
+:where(
+  .page
+    :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible
+) {
   outline: 3px solid var(--rm-grape);
   outline-offset: 3px;
 }
