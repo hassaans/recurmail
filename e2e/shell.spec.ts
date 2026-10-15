@@ -322,3 +322,40 @@ test("a failed delete reports inside the confirmation dialog and lets the user r
   await expect(card).toHaveCount(0);
   await expect(appAlerts).toHaveCount(0);
 });
+
+test("fields with their own focus ring are not overdrawn by the shell's square outline", async ({
+  page,
+  context,
+  scenario,
+}) => {
+  await context.addCookies([testSessionCookie(scenario.connected.accessToken)]);
+  await page.goto("/schedules/new");
+
+  // Text inputs match :focus-visible on click, which is how the owner saw it.
+  const to = page.getByRole("textbox", { name: "To" });
+  await to.click();
+  await expect(to).toBeFocused();
+  const ring = await to.evaluate((input) => {
+    const box = input.parentElement as HTMLElement;
+    return {
+      inputOutline: getComputedStyle(input).outlineStyle,
+      boxRadius: getComputedStyle(box).borderTopLeftRadius,
+      boxShadow: getComputedStyle(box).boxShadow,
+    };
+  });
+  expect(ring.inputOutline).toBe("none");
+  expect(ring.boxRadius).toBe("12px");
+  expect(ring.boxShadow).not.toBe("none");
+
+  // Controls without their own focus style keep the shell's visible ring.
+  const settings = page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("link", { name: "Settings" });
+  await settings.focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(settings).toBeFocused();
+  expect(
+    await settings.evaluate((link) => getComputedStyle(link).outlineStyle),
+  ).toBe("solid");
+});
