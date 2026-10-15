@@ -49,12 +49,11 @@ export function SiteHeader(props: SiteHeaderProps) {
               Log in
             </a>
           </li>
-          <li>
-            <a className="nav-primary" href="/auth/signin">
-              Create free account
-            </a>
-          </li>
         </ul>
+        {/* Outside the list so phones can keep it on the logo's row. */}
+        <a className="nav-primary" href="/auth/signin">
+          Create free account
+        </a>
       </nav>
     </header>
   );
