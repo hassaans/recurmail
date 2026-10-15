@@ -11,14 +11,6 @@
   font: 800 clamp(30px, 4.5vw, 40px) / 1.1 var(--rm-font-display);
   letter-spacing: -0.03em;
 }
-.eyebrow {
-  margin: 0 0 6px;
-  color: var(--rm-grape-dark);
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
 .lede {
   margin: 8px 0 0;
   max-width: 560px;
@@ -28,13 +20,6 @@
   display: grid;
   justify-items: end;
   gap: 6px;
-}
-.hint {
-  margin: 0;
-  max-width: 260px;
-  color: var(--rm-muted);
-  font-size: 13px;
-  text-align: right;
 }
 .status {
   display: grid;
@@ -221,10 +206,6 @@
   .headerActions a,
   .headerActions button {
     width: 100%;
-  }
-  .hint {
-    max-width: none;
-    text-align: left;
   }
   .step {
     gap: 14px;

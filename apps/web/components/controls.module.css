@@ -83,6 +83,37 @@
   font-size: 14px;
 }
 
+/* Pending state for a clicked control: the label changes ("Pausing…") and a
+   small spinner sits in front of it, so the user sees which action is running. */
+.spinner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: control-spin 0.8s linear infinite;
+}
+@keyframes control-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
+}
+
+/* Page eyebrow above an h1, matching the homepage: sentence case, no tracking. */
+.eyebrow {
+  margin: 0 0 6px;
+  color: var(--rm-grape-dark);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;

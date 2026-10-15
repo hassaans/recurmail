@@ -7,7 +7,8 @@ import type { ScheduleRow } from "./schedules";
 export interface ScheduleSummary {
   id: string;
   subject: string;
-  recipients: number;
+  /** First addresses plus "and N more", built on the server. */
+  recipients: string;
   rrule: string;
   timezone: string;
   status: ScheduleRow["status"];
@@ -18,7 +19,7 @@ export function summarizeSchedule(row: ScheduleRow): ScheduleSummary {
   return {
     id: row.id,
     subject: row.subject,
-    recipients: row.to.length + row.cc.length + row.bcc.length,
+    recipients: recipientSummary([...row.to, ...row.cc, ...row.bcc]),
     rrule: row.rrule,
     timezone: row.timezone,
     status: row.status,
@@ -26,6 +27,14 @@ export function summarizeSchedule(row: ScheduleRow): ScheduleSummary {
   };
 }
 
-export function recipientSummary(count: number): string {
-  return `${count} ${count === 1 ? "recipient" : "recipients"}`;
+/**
+ * Names the first two recipients so a card reads "who gets this" at a glance,
+ * and counts the rest: "a@x.test, b@y.test and 3 more".
+ */
+export function recipientSummary(addresses: string[]): string {
+  const shown = addresses.slice(0, 2);
+  const more = addresses.length - shown.length;
+  if (shown.length === 0) return "No recipients";
+  if (more === 0) return shown.join(" and ");
+  return `${shown.join(", ")} and ${more} more`;
 }

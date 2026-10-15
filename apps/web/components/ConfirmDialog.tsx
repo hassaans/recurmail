@@ -9,6 +9,8 @@ type ConfirmDialogProps = {
   title: string;
   description: string;
   confirmLabel: string;
+  /** Label shown on the confirm button while the action runs, e.g. "Deleting…". */
+  pendingLabel?: string;
   tone?: "danger" | "default";
   busy?: boolean;
   /** Failure message shown inside the dialog, since the page behind it is inert. */
@@ -24,6 +26,7 @@ export default function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  pendingLabel,
   tone = "default",
   busy = false,
   error = null,
@@ -47,7 +50,7 @@ export default function ConfirmDialog({
       aria-describedby={descriptionId}
       onCancel={(event) => {
         event.preventDefault();
-        onCancel();
+        if (!busy) onCancel();
       }}
       onClose={onCancel}
     >
@@ -73,7 +76,14 @@ export default function ConfirmDialog({
           onClick={onConfirm}
           disabled={busy}
         >
-          {confirmLabel}
+          {busy ? (
+            <>
+              <span className={controls.spinner} aria-hidden="true" />
+              {pendingLabel ?? confirmLabel}
+            </>
+          ) : (
+            confirmLabel
+          )}
         </button>
       </div>
     </dialog>
