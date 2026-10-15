@@ -44,16 +44,7 @@ a { color: inherit; }
 .wrap { width: min(100% - 56px, 1120px); margin-inline: auto; }
 .skip-link { position: absolute; z-index: 2; top: 12px; left: -9999px; padding: 10px 14px; border-radius: var(--rm-radius-sm); background: var(--rm-paper); }
 .skip-link:focus { left: 16px; }
-.site-header { padding-top: 10px; }
-.nav { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 0; }
-.logo { display: inline-flex; align-items: center; gap: 10px; flex: none; font: 700 26px/1 var(--rm-font-display); letter-spacing: -0.03em; text-decoration: none; }
-.logo svg { display: block; width: 34px; height: 34px; }
-.nav-links { display: flex; align-items: center; justify-content: flex-end; gap: 24px; flex-wrap: wrap; margin: 0 0 0 auto; padding: 0; list-style: none; }
-.nav-links a { color: var(--rm-ink-2); font-size: 15px; font-weight: 500; text-decoration: none; }
-.nav-links a:hover, .text-link:hover { color: var(--rm-grape-dark); }
-.nav a.nav-primary { flex: none; margin-left: 4px; text-decoration: none; padding: 11px 16px; font-size: 15px; border-radius: 999px; background: var(--rm-grape); color: #fff; font-weight: 600; white-space: nowrap; }
-.nav a.nav-primary:hover { background: var(--rm-grape-dark); color: #fff; }
-.nav-links a.nav-login { white-space: nowrap; }
+.text-link:hover { color: var(--rm-grape-dark); }
 .guide { min-height: calc(100vh - 180px); padding-top: 64px; padding-bottom: 88px; }
 .guide-header { max-width: 760px; margin-bottom: 38px; }
 .guide-header h1 { margin: 0; font: 800 clamp(38px, 5vw, 58px)/1.05 var(--rm-font-display); letter-spacing: -0.03em; }
@@ -71,9 +62,7 @@ a { color: inherit; }
 footer { padding: 32px 0 48px; border-top: 1px solid var(--rm-line); color: var(--rm-muted); font-size: 14px; }
 .footer-content { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
 footer p { margin: 0; color: var(--rm-muted); }
-@media (max-width: 860px) { .nav { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "logo cta" "links links"; align-items: center; gap: 14px 12px; reading-flow: grid-rows; } .logo { grid-area: logo; justify-self: start; } .nav a.nav-primary { grid-area: cta; margin-left: 0; } .nav-links { grid-area: links; justify-content: flex-start; gap: 10px 20px; margin: 0; } .nav-links li:last-child { margin-left: auto; } }
-@media (max-width: 620px) { .wrap { width: min(100% - 40px, 1120px); } .logo { gap: 8px; font-size: 22px; } .logo svg { width: 30px; height: 30px; } .nav a.nav-primary { padding: 10px 12px; font-size: 14px; } .guide { padding-top: 44px; padding-bottom: 64px; } .guide-header p { font-size: 17px; } }
-@media (max-width: 359px) { .nav { grid-template-columns: minmax(0, 1fr); grid-template-areas: "logo" "cta" "links"; } .nav a.nav-primary { justify-self: start; } }
+@media (max-width: 620px) { .wrap { width: min(100% - 40px, 1120px); } .guide { padding-top: 44px; padding-bottom: 64px; } .guide-header p { font-size: 17px; } }
 `;
 
 export default function GmailExtensionAlternativeGuide() {

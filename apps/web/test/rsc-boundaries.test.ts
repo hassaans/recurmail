@@ -8,6 +8,7 @@ import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import ConfirmForm from "../components/ConfirmForm";
 import DashboardNotices from "../components/DashboardNotices";
+import { HeaderMenu } from "../components/HeaderMenu";
 import ScheduleEditor from "../components/ScheduleEditor";
 import ScheduleList from "../components/ScheduleList";
 import SchedulePauseButton from "../components/SchedulePauseButton";
@@ -47,6 +48,10 @@ type DashboardNoticesPropsAreDataOnly = Assert<
     : false
 >;
 
+type HeaderMenuPropsAreDataOnly = Assert<
+  HasFunction<ComponentProps<typeof HeaderMenu>> extends false ? true : false
+>;
+
 vi.stubGlobal("React", React);
 
 vi.mock("next/navigation", () => ({
@@ -69,6 +74,7 @@ const expectedPages = [
   "app/(app)/schedules/[id]/page.tsx",
   "app/(app)/settings/page.tsx",
   "app/dashboard/page.tsx",
+  "components/SiteHeader.tsx",
 ];
 
 const listProps: ComponentProps<typeof ScheduleList> = {
@@ -110,6 +116,13 @@ const pauseButtonProps: ComponentProps<typeof SchedulePauseButton> = {
   subject: "Weekly check-in",
   status: "paused",
 };
+const headerMenuProps: ComponentProps<typeof HeaderMenu> = {
+  links: [
+    { href: "#how-it-works", label: "How it works" },
+    { href: "/dashboard", label: "Log in" },
+  ],
+};
+
 const noticesProps: ComponentProps<typeof DashboardNotices> = {
   notices: [
     { tone: "success", text: "Schedule saved." },
@@ -227,12 +240,14 @@ describe("server/client prop boundaries", () => {
     const confirmFormPropsAreDataOnly: ConfirmFormPropsAreDataOnly = true;
     const pauseButtonPropsAreDataOnly: SchedulePauseButtonPropsAreDataOnly = true;
     const noticesPropsAreDataOnly: DashboardNoticesPropsAreDataOnly = true;
+    const headerMenuPropsAreDataOnly: HeaderMenuPropsAreDataOnly = true;
 
     expect(editorPropsAreDataOnly).toBe(true);
     expect(listPropsAreDataOnly).toBe(true);
     expect(confirmFormPropsAreDataOnly).toBe(true);
     expect(pauseButtonPropsAreDataOnly).toBe(true);
     expect(noticesPropsAreDataOnly).toBe(true);
+    expect(headerMenuPropsAreDataOnly).toBe(true);
   });
 
   it("round-trips representative client component props through JSON", () => {
@@ -251,6 +266,9 @@ describe("server/client prop boundaries", () => {
       pauseButtonProps,
     );
     expect(JSON.parse(JSON.stringify(noticesProps))).toEqual(noticesProps);
+    expect(JSON.parse(JSON.stringify(headerMenuProps))).toEqual(
+      headerMenuProps,
+    );
   });
 
   it("renders each client component with react-dom/server", () => {
@@ -384,6 +402,11 @@ describe("server/client prop boundaries", () => {
     expect(
       renderToString(createElement(DashboardNotices, { notices: [] })),
     ).toBe("");
+    // The server renders the menu closed; it opens only after hydration.
+    const menu = renderToString(createElement(HeaderMenu, headerMenuProps));
+    expect(menu).toContain('aria-expanded="false"');
+    expect(menu).toMatch(/<ul[^>]*hidden=""/);
+    expect(menu).toContain('href="/dashboard"');
   });
 
   it("keeps the server pages passing only data to imported client components", () => {

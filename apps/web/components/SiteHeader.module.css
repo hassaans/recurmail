@@ -1,0 +1,211 @@
+/* The public site header: homepage, guides, legal and status pages. Up to
+   860px it is one row (logo, sign-up, menu button) and the section links and
+   Log in move into the menu panel, the pattern most product sites use on
+   phones. Selectors pair a class with the element so a page's own `a` rules
+   cannot restyle the header. */
+
+.header {
+  padding-top: 10px;
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+  padding: 16px 0;
+}
+
+.nav a.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  margin-right: auto;
+  color: var(--rm-ink);
+  font: 700 26px / 1 var(--rm-font-display);
+  letter-spacing: -0.03em;
+  text-decoration: none;
+}
+
+.logo svg {
+  display: block;
+  width: 34px;
+  height: 34px;
+  flex: none;
+}
+
+.links {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav .links a {
+  color: var(--rm-ink-2);
+  font-size: 15px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.nav .links a:hover {
+  color: var(--rm-grape-dark);
+}
+
+.nav a.cta {
+  flex: none;
+  margin-left: 4px;
+  padding: 11px 16px;
+  border-radius: var(--rm-radius-pill);
+  background: var(--rm-grape);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.nav a.cta:hover {
+  background: var(--rm-grape-dark);
+  color: #fff;
+}
+
+.ctaShort,
+.menuButton,
+.panel {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .nav {
+    gap: 10px;
+  }
+
+  .links,
+  .ctaLong {
+    display: none;
+  }
+
+  .links.inRow {
+    display: flex;
+    margin-right: 6px;
+  }
+
+  .ctaShort {
+    display: inline;
+  }
+
+  .nav a.cta {
+    margin-left: 0;
+    padding: 10px 14px;
+    font-size: 14px;
+  }
+
+  .menuButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    margin-right: -8px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--rm-radius-sm);
+    background: transparent;
+    color: var(--rm-ink);
+    cursor: pointer;
+  }
+
+  .menuButton:hover,
+  .menuButton[aria-expanded="true"] {
+    background: var(--rm-paper);
+  }
+
+  .menuButton:focus-visible {
+    outline: 3px solid var(--rm-grape);
+    outline-offset: 2px;
+  }
+
+  .menuButton svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .panel:not([hidden]) {
+    display: block;
+    flex-basis: 100%;
+    margin: 4px 0 0;
+    padding: 6px 0;
+    border: 1px solid var(--rm-line);
+    border-radius: var(--rm-radius-sm);
+    background: var(--rm-paper);
+    box-shadow: 0 12px 32px rgba(27, 21, 48, 0.08);
+    list-style: none;
+  }
+
+  .panel li + li {
+    border-top: 1px solid var(--rm-line);
+  }
+
+  .nav .panel a {
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    padding: 0 18px;
+    color: var(--rm-ink);
+    font-size: 16px;
+    font-weight: 500;
+    text-decoration: none;
+  }
+
+  .nav .panel a:hover {
+    color: var(--rm-grape-dark);
+  }
+}
+
+@media (max-width: 620px) {
+  .nav a.logo {
+    gap: 8px;
+    font-size: 22px;
+  }
+
+  .logo svg {
+    width: 30px;
+    height: 30px;
+  }
+}
+
+@media (max-width: 359px) {
+  .nav {
+    gap: 8px;
+  }
+
+  .nav a.logo {
+    gap: 7px;
+    font-size: 18px;
+  }
+
+  .logo svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  .nav a.cta {
+    padding: 9px 12px;
+    font-size: 13px;
+  }
+
+  .links.inRow {
+    margin-right: 0;
+  }
+
+  .nav .links a {
+    font-size: 14px;
+  }
+}

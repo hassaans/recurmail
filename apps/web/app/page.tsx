@@ -122,16 +122,7 @@ section { padding: 88px 0; }
 .band { border-block: 1px solid var(--rm-line); background: var(--rm-bg-2); }
 .skip-link { position: absolute; z-index: 20; top: 12px; left: -9999px; padding: 10px 14px; border-radius: var(--rm-radius-sm); background: var(--rm-paper); }
 .skip-link:focus { left: 16px; }
-.site-header { padding-top: 10px; }
-.nav { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 0; }
-.logo { display: inline-flex; align-items: center; gap: 10px; flex: none; font: 700 26px/1 var(--rm-font-display); letter-spacing: -0.03em; text-decoration: none; }
-.logo svg { width: 34px; height: 34px; }
-.nav-links { display: flex; align-items: center; justify-content: flex-end; gap: 24px; flex-wrap: wrap; margin: 0 0 0 auto; padding: 0; list-style: none; }
-.nav-links a { color: var(--rm-ink-2); font-size: 15px; font-weight: 500; text-decoration: none; }
-.nav-links a:hover, .guide-link:hover { color: var(--rm-grape-dark); }
-.nav a.nav-primary { flex: none; margin-left: 4px; text-decoration: none; padding: 11px 16px; font-size: 15px; border-radius: var(--rm-radius-pill); background: var(--rm-grape); color: #fff; font-weight: 600; white-space: nowrap; }
-.nav a.nav-primary:hover { background: var(--rm-grape-dark); color: #fff; }
-.nav-links a.nav-login { white-space: nowrap; }
+.guide-link:hover { color: var(--rm-grape-dark); }
 .pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border: 1px solid var(--rm-line); border-radius: var(--rm-radius-pill); background: var(--rm-paper); color: var(--rm-ink-2); font-size: 14px; font-weight: 500; }
 .hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); align-items: center; gap: 56px; padding: 48px 0 72px; }
 .hero h1 em { padding: 0 4px; margin: 0 -4px; background: linear-gradient(transparent 64%, var(--rm-sun) 64%, var(--rm-sun) 92%, transparent 92%); color: var(--rm-grape); font-style: normal; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
@@ -227,9 +218,7 @@ footer p { color: var(--rm-muted); }
 @media (prefers-reduced-motion: no-preference) { .float { animation: float 6s ease-in-out infinite; } @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
 @media (max-width: 900px) { .hero, .limit { grid-template-columns: minmax(0, 1fr); gap: 40px; } .steps, .cal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hero-art { max-width: 650px; } }
-@media (max-width: 860px) { .nav { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "logo cta" "links links"; align-items: center; gap: 14px 12px; reading-flow: grid-rows; } .logo { grid-area: logo; justify-self: start; } .nav a.nav-primary { grid-area: cta; margin-left: 0; } .nav-links { grid-area: links; justify-content: flex-start; gap: 10px 20px; margin: 0; } .nav-links li:last-child { margin-left: auto; } }
-@media (max-width: 620px) { body { font-size: 16px; } .wrap { width: min(100% - 40px, 1120px); } .logo { gap: 8px; font-size: 22px; } .logo svg { width: 30px; height: 30px; } .nav a.nav-primary { padding: 10px 12px; font-size: 14px; } .steps, .cal-grid, .ways, .privacy, .guide-links { grid-template-columns: minmax(0, 1fr); } section { padding: 64px 0; } .hero { gap: 34px; padding: 34px 0 56px; } .hero-art { padding-right: 0; } .repeat { margin-inline: 12px; padding: 12px; } .compose-top, .field { padding-inline: 14px; } .compose-body { padding-inline: 14px; } .closing { margin-bottom: 64px; padding: 48px 24px; border-radius: 22px; } }
-@media (max-width: 359px) { .nav { grid-template-columns: minmax(0, 1fr); grid-template-areas: "logo" "cta" "links"; } .nav a.nav-primary { justify-self: start; } }
+@media (max-width: 620px) { body { font-size: 16px; } .wrap { width: min(100% - 40px, 1120px); } .steps, .cal-grid, .ways, .privacy, .guide-links { grid-template-columns: minmax(0, 1fr); } section { padding: 64px 0; } .hero { gap: 34px; padding: 34px 0 56px; } .hero-art { padding-right: 0; } .repeat { margin-inline: 12px; padding: 12px; } .compose-top, .field { padding-inline: 14px; } .compose-body { padding-inline: 14px; } .closing { margin-bottom: 64px; padding: 48px 24px; border-radius: 22px; } }
 `;
 
 export default function HomePage() {
