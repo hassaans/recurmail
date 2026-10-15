@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  ConnectionAddressConflictError,
   ConnectionLimitError,
   createConnectionStore,
   MAX_GMAIL_CONNECTIONS,
@@ -137,10 +138,21 @@ describe("connection persistence honors column grants and user isolation", () =>
   const work = "22222222-2222-4222-8222-222222222222";
   const connection = {
     user_id: "owner",
+    google_sub: "google-owner-sub",
     google_email: "owner@gmail.com",
     is_workspace: false,
     encrypted_refresh_token: "v1.encrypted",
     status: "connected" as const,
+    connected_at: "2026-10-14",
+  };
+  // What the store writes to a matched row: the account id (filled in for a
+  // row that had none), the current address, and the fresh token and status.
+  const patched = {
+    google_sub: "google-owner-sub",
+    google_email: "owner@gmail.com",
+    is_workspace: false,
+    encrypted_refresh_token: "v1.encrypted",
+    status: "connected",
     connected_at: "2026-10-14",
   };
   function store(fetcher: typeof fetch) {
@@ -219,11 +231,17 @@ describe("connection persistence honors column grants and user isolation", () =>
     expect(JSON.stringify(init)).not.toContain("fake-secret");
   });
 
-  it("adds a new account with service access after checking the user's existing addresses", async () => {
+  it("adds a new account with service access after checking the user's existing accounts", async () => {
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce(
-        Response.json([{ id: work, google_email: "work@company.test" }]),
+        Response.json([
+          {
+            id: work,
+            google_email: "work@company.test",
+            google_sub: "google-work-sub",
+          },
+        ]),
       )
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     await store(fetcher).save(connection);
@@ -232,7 +250,7 @@ describe("connection persistence honors column grants and user isolation", () =>
     expect(lookup.method).toBe("GET");
     expect(new URL(lookupUrl).searchParams.get("user_id")).toBe("eq.owner");
     expect(new URL(lookupUrl).searchParams.get("select")).toBe(
-      "id,google_email",
+      "id,google_email,google_sub",
     );
     expect(lookup.headers).toEqual(service);
     const [insertUrl, insert] = fetcher.mock.calls[1];
@@ -243,30 +261,121 @@ describe("connection persistence honors column grants and user isolation", () =>
     expect(JSON.parse(insert.body)).toEqual(connection);
   });
 
-  it("updates the row that already holds the same address, ignoring case, instead of adding one", async () => {
+  it("updates the row with the same Google account id when its address changed, writing the new address", async () => {
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce(
         Response.json([
-          { id: work, google_email: "work@company.test" },
-          { id: personal, google_email: "Owner@GMAIL.com" },
+          {
+            id: work,
+            google_email: "work@company.test",
+            google_sub: "google-work-sub",
+          },
+          {
+            id: personal,
+            google_email: "old-name@gmail.com",
+            google_sub: "google-owner-sub",
+          },
         ]),
       )
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
-    await store(fetcher).save({ ...connection, status: "connected" });
+    await store(fetcher).save(connection);
     expect(fetcher).toHaveBeenCalledTimes(2);
     const [url, init] = fetcher.mock.calls[1];
     expect(init.method).toBe("PATCH");
     expect(new URL(url).searchParams.get("id")).toBe("eq." + personal);
     expect(new URL(url).searchParams.get("user_id")).toBe("eq.owner");
     expect(init.headers).toEqual(service);
-    expect(JSON.parse(init.body)).toEqual({
-      google_email: "owner@gmail.com",
-      is_workspace: false,
-      encrypted_refresh_token: "v1.encrypted",
-      status: "connected",
-      connected_at: "2026-10-14",
-    });
+    expect(JSON.parse(init.body)).toEqual(patched);
+  });
+
+  it("fills the account id into a row that has none and the same address, ignoring case, instead of adding one", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json([
+          {
+            id: work,
+            google_email: "work@company.test",
+            google_sub: "google-work-sub",
+          },
+          { id: personal, google_email: "Owner@GMAIL.com", google_sub: null },
+        ]),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await store(fetcher).save(connection);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const [url, init] = fetcher.mock.calls[1];
+    expect(init.method).toBe("PATCH");
+    expect(new URL(url).searchParams.get("id")).toBe("eq." + personal);
+    expect(new URL(url).searchParams.get("user_id")).toBe("eq.owner");
+    expect(init.headers).toEqual(service);
+    expect(JSON.parse(init.body)).toEqual(patched);
+  });
+
+  it("prefers the row with the same account id over one with the same address and no id", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json([
+          { id: work, google_email: "owner@gmail.com", google_sub: null },
+          {
+            id: personal,
+            google_email: "old-name@gmail.com",
+            google_sub: "google-owner-sub",
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await store(fetcher).save(connection);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const [url, init] = fetcher.mock.calls[1];
+    expect(init.method).toBe("PATCH");
+    expect(new URL(url).searchParams.get("id")).toBe("eq." + personal);
+  });
+
+  it("refuses to take over a row whose address matches but belongs to a different Google account", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(
+      Response.json([
+        {
+          id: personal,
+          google_email: "Owner@gmail.com",
+          google_sub: "google-someone-else-sub",
+        },
+      ]),
+    );
+    const failure = store(fetcher).save(connection);
+    await expect(failure).rejects.toBeInstanceOf(
+      ConnectionAddressConflictError,
+    );
+    await expect(failure).rejects.toMatchObject({ code: "address_in_use" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][1].method).toBe("GET");
+  });
+
+  it("reports an update the unique indexes refuse as an address conflict", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json([
+          {
+            id: personal,
+            google_email: "old-name@gmail.com",
+            google_sub: "google-owner-sub",
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          { code: "23505", message: "duplicate key value" },
+          { status: 409 },
+        ),
+      );
+    await expect(store(fetcher).save(connection)).rejects.toBeInstanceOf(
+      ConnectionAddressConflictError,
+    );
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[1][1].method).toBe("PATCH");
   });
 
   it("refuses to add an account past the cap without writing", async () => {
@@ -275,6 +384,7 @@ describe("connection persistence honors column grants and user isolation", () =>
         Array.from({ length: MAX_GMAIL_CONNECTIONS }, (_, index) => ({
           id: "44444444-4444-4444-8444-" + String(index).padStart(12, "0"),
           google_email: "account" + index + "@company.test",
+          google_sub: "google-account-sub-" + index,
         })),
       ),
     );
@@ -296,7 +406,13 @@ describe("connection persistence honors column grants and user isolation", () =>
         ),
       )
       .mockResolvedValueOnce(
-        Response.json([{ id: personal, google_email: "Owner@gmail.com" }]),
+        Response.json([
+          {
+            id: personal,
+            google_email: "Owner@gmail.com",
+            google_sub: "google-owner-sub",
+          },
+        ]),
       )
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     await store(fetcher).save(connection);
@@ -310,17 +426,43 @@ describe("connection persistence honors column grants and user isolation", () =>
     expect(new URL(fetcher.mock.calls[2][0]).searchParams.get("user_id")).toBe(
       "eq.owner",
     );
+    expect(new URL(fetcher.mock.calls[2][0]).searchParams.get("select")).toBe(
+      "id,google_email,google_sub",
+    );
     const [url, init] = fetcher.mock.calls[3];
     expect(new URL(url).searchParams.get("id")).toBe("eq." + personal);
     expect(new URL(url).searchParams.get("user_id")).toBe("eq.owner");
     expect(init.headers).toEqual(service);
-    expect(JSON.parse(init.body)).toEqual({
-      google_email: "owner@gmail.com",
-      is_workspace: false,
-      encrypted_refresh_token: "v1.encrypted",
-      status: "connected",
-      connected_at: "2026-10-14",
-    });
+    expect(JSON.parse(init.body)).toEqual(patched);
+  });
+
+  it("re-reads after a conflict with the same rules, so a different account on that address is refused, not taken over", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json([]))
+      .mockResolvedValueOnce(
+        Response.json(
+          { code: "23505", message: "duplicate key value" },
+          { status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json([
+          {
+            id: personal,
+            google_email: "owner@gmail.com",
+            google_sub: "google-someone-else-sub",
+          },
+        ]),
+      );
+    await expect(store(fetcher).save(connection)).rejects.toBeInstanceOf(
+      ConnectionAddressConflictError,
+    );
+    expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual([
+      "GET",
+      "POST",
+      "GET",
+    ]);
   });
 
   it("fails a conflict that no row explains, and does not retry other refusals", async () => {

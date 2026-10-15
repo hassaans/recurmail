@@ -37,6 +37,7 @@ type Snapshot = {
     id: string;
     user_id: string;
     google_email: string;
+    google_sub: string | null;
     status: string;
     encrypted_refresh_token: string;
   }[];
@@ -51,18 +52,28 @@ async function signIn(context: BrowserContext, user: SessionUser) {
   ]);
 }
 
-/** Which account the fake Google chooser picks at the next consent. */
+/**
+ * Which account the fake Google chooser picks at the next consent. The
+ * account id defaults to one derived from the address; passing another one
+ * stands for a renamed account (an old id, new address) or for a different
+ * account that now owns a known address.
+ */
 async function grant(
   request: APIRequestContext,
   scenario: Scenario,
   email: string,
+  sub?: string,
 ) {
   const response = await request.post(
     `${fakeSupabaseUrl}/__test/scenarios/${scenario.id}/grant`,
-    { data: { email } },
+    { data: { email, ...(sub ? { sub } : {}) } },
   );
   expect(response.status(), await response.text()).toBe(200);
-  return (await response.json()) as { email: string; refresh_token: string };
+  return (await response.json()) as {
+    email: string;
+    sub: string;
+    refresh_token: string;
+  };
 }
 
 async function setup(
@@ -76,6 +87,7 @@ async function setup(
   expect(response.status(), await response.text()).toBe(200);
   return (await response.json()) as {
     connection_id: string;
+    google_sub?: string;
     refresh_token?: string;
   };
 }
@@ -471,7 +483,10 @@ test("disconnecting one account pauses only its schedules and the other account 
     `${appOrigin}/schedules/${fromWork.body.schedule.id}/edit`,
   );
   const from = page.getByRole("combobox", { name: "From" });
-  await expect(from).toHaveValue("");
+  // First visit to the edit page in a run: the dev server compiles the page
+  // and the schedule API route on demand, which can take longer than the
+  // default wait before the form replaces "Loading schedule".
+  await expect(from).toHaveValue("", { timeout: 15000 });
   await expect(from.getByRole("option")).toHaveText([
     "Choose a Gmail account",
     scenario.owner.email,
@@ -590,4 +605,101 @@ test("reconnecting saves whichever account Google granted, then re-granting the 
     status: "active",
     gmail_connection_id: scenario.connectionIds.reconnect,
   });
+});
+
+test("an account Google now reports under a new address keeps its row and schedules, and an address held by a different Google account is refused", async ({
+  page,
+  context,
+  request,
+  scenario,
+}) => {
+  // Two accounts, so the schedule cards say which one each sends from.
+  const personal = await setup(request, scenario, "account-deletion");
+  const work = await setup(request, scenario, "second-account");
+  if (!work.google_sub) throw new Error("work account has no Google id");
+  await signIn(context, scenario.owner);
+  await page.goto("/dashboard");
+  const fromWork = await api(
+    page,
+    "POST",
+    "/api/schedules",
+    dailyInput(1, {
+      subject: "From the work account",
+      gmail_connection_id: work.connection_id,
+    }),
+  );
+  expect(fromWork.status, JSON.stringify(fromWork.body)).toBe(201);
+  await page.goto("/dashboard");
+  await expect(accountRow(page, scenario.workEmail)).toContainText("Connected");
+  const card = scheduleCard(page, "From the work account");
+  await expect(card).toContainText(`From ${scenario.workEmail}`);
+
+  // The same Google account grants again under a new address (a domain
+  // change, so the old address is not a substring of the new one). The row
+  // is updated in place, so the schedule keeps sending from it.
+  const renamed = `${scenario.owner.id}@renamed.company.test`;
+  await grant(request, scenario, renamed, work.google_sub);
+  await page
+    .getByRole("button", { name: "Add another Gmail account", exact: true })
+    .click();
+  await expect(page).toHaveURL(
+    `${appOrigin}/dashboard?gmail=connected&email=${encodeURIComponent(renamed)}`,
+  );
+  await expect(notice(page, "Connected ")).toContainText(
+    `Connected ${renamed}.`,
+  );
+  await expect(accountsRegion(page).getByRole("listitem")).toHaveCount(2);
+  await expect(accountRow(page, renamed)).toContainText("Connected");
+  await expect(accountRow(page, scenario.workEmail)).toHaveCount(0);
+  await expect(accountRow(page, scenario.owner.email)).toContainText(
+    "Connected",
+  );
+  await expect(card).toContainText("Status Active");
+  await expect(card).toContainText(`From ${renamed}`);
+  const mine = (snap: Snapshot) =>
+    snap.connections.filter((row) => row.user_id === scenario.owner.id);
+  const afterRename = await snapshot(request, scenario);
+  expect(mine(afterRename)).toHaveLength(2);
+  expect(
+    afterRename.connections.find((row) => row.id === work.connection_id),
+  ).toMatchObject({
+    google_email: renamed,
+    google_sub: work.google_sub,
+    status: "connected",
+  });
+  expect(
+    afterRename.connections.find((row) => row.id === personal.connection_id),
+  ).toMatchObject({ google_email: scenario.owner.email, status: "connected" });
+  expect(
+    afterRename.schedules.find((row) => row.id === fromWork.body.schedule.id),
+  ).toMatchObject({
+    status: "active",
+    gmail_connection_id: work.connection_id,
+  });
+
+  // A different Google account now owns that address. It must not take over
+  // the row: the user is told, the grant is revoked, and the row keeps its
+  // account and token.
+  const other = await grant(
+    request,
+    scenario,
+    renamed,
+    `other-${scenario.owner.id}`,
+  );
+  await page
+    .getByRole("button", { name: "Add another Gmail account", exact: true })
+    .click();
+  await expect(page).toHaveURL(
+    `${appOrigin}/dashboard?gmail=address_in_use&email=${encodeURIComponent(renamed)}`,
+  );
+  await expect(notice(page, "already connected")).toContainText(
+    `${renamed} is already connected here as a different Google account. Disconnect that one first if you want to replace it.`,
+  );
+  await expect(accountsRegion(page).getByRole("listitem")).toHaveCount(2);
+  await expect(card).toContainText("Status Active");
+  await expect(card).toContainText(`From ${renamed}`);
+  const afterConflict = await snapshot(request, scenario);
+  expect(mine(afterConflict)).toEqual(mine(afterRename));
+  expect(afterConflict.revokedTokens).toEqual([other.refresh_token]);
+  expect(other.refresh_token).not.toBe(work.refresh_token);
 });

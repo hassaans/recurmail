@@ -28,6 +28,7 @@ function googleIdToken(email: string) {
       iss: "https://accounts.google.com",
       aud: config.googleClientId,
       exp: Math.floor(Date.now() / 1000) + 3600,
+      sub: `google-sub-${email}`,
       email,
       email_verified: true,
     }),
@@ -297,9 +298,13 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
             rows.splice(0, rows.length);
             return new Response(null, { status: 204 });
           }
-          if (select === "id,google_email")
+          if (select === "id,google_email,google_sub")
             return Response.json(
-              rows.map(({ id, google_email }) => ({ id, google_email })),
+              rows.map(({ id, google_email, google_sub }) => ({
+                id,
+                google_email,
+                google_sub,
+              })),
             );
           expect(select).toBe("google_email,encrypted_refresh_token");
           expect(url.searchParams.get("id")).toBe(`eq.${connectionId}`);

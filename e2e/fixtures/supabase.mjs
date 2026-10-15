@@ -22,6 +22,7 @@ const connectionColumns = [
   "id",
   "user_id",
   "google_email",
+  "google_sub",
   "is_workspace",
   "status",
   "connected_at",
@@ -88,16 +89,54 @@ function newSchedule(user, status = "active", connectionId = null) {
 
 const isWorkspaceAddress = (email) => !/@(gmail|googlemail)\.com$/i.test(email);
 
-function newConnection(user, email, status, encryptedRefreshToken) {
+// Rows seeded without a Google account id stand for connections written
+// before the id was stored; the app fills the id in when they reconnect.
+function newConnection(
+  user,
+  email,
+  status,
+  encryptedRefreshToken,
+  googleSub = null,
+) {
   return {
     id: randomUUID(),
     user_id: user.id,
     google_email: email,
+    google_sub: googleSub,
     is_workspace: isWorkspaceAddress(email),
     status,
     connected_at: "2026-10-14T09:00:00.000Z",
     encrypted_refresh_token: encryptedRefreshToken,
   };
+}
+
+// The fake Google account id for an address. A test that renames an account
+// passes the old id with the new address instead.
+const googleSubFor = (email) =>
+  createHash("sha256").update(email.toLowerCase()).digest("hex");
+
+// Mirrors the column check from migration 0007: null, or 1 to 255 characters.
+const validGoogleSub = (value) =>
+  value === null ||
+  value === undefined ||
+  (typeof value === "string" && value.length >= 1 && value.length <= 255);
+
+// Mirrors the two unique indexes from migration 0007: one row per address
+// (ignoring case) and one per Google account id, among a user's rows.
+function uniqueConflict(existing, row) {
+  if (
+    existing.some(
+      (candidate) =>
+        candidate.google_email.toLowerCase() === row.google_email.toLowerCase(),
+    )
+  )
+    return "gmail_connections_user_id_lower_email_key";
+  if (
+    typeof row.google_sub === "string" &&
+    existing.some((candidate) => candidate.google_sub === row.google_sub)
+  )
+    return "gmail_connections_user_id_google_sub_key";
+  return null;
 }
 
 function encryptedToken(token, userId) {
@@ -119,8 +158,10 @@ function encryptedToken(token, userId) {
 
 // Google issues one refresh token per granting account. The owner's own
 // address gets a stable token so tests can name it before the grant happens.
-function gmailRefreshTokenFor(scenario, email) {
-  const key = email.toLowerCase();
+// One refresh token per Google account. The default id derives from the
+// address, so a plain grant for an address always gets that address's token.
+function gmailRefreshTokenFor(scenario, email, sub = googleSubFor(email)) {
+  const key = sub;
   let token = scenario.gmailRefreshTokens.get(key);
   if (!token) {
     token = `fake-secret-gmail-refresh-${randomUUID()}`;
@@ -132,7 +173,7 @@ function gmailRefreshTokenFor(scenario, email) {
 // The ID token Google returns alongside the grant, naming the account that
 // granted it. Only the claims matter: the app reads them without verifying
 // the signature because the token arrives straight from Google over TLS.
-function idTokenFor(email) {
+function idTokenFor(email, sub = googleSubFor(email)) {
   const segment = (value) =>
     Buffer.from(JSON.stringify(value)).toString("base64url");
   return [
@@ -140,7 +181,7 @@ function idTokenFor(email) {
     segment({
       iss: "https://accounts.google.com",
       aud: "fake-google-client",
-      sub: createHash("sha256").update(email.toLowerCase()).digest("hex"),
+      sub,
       email,
       email_verified: true,
       iat: Math.floor(Date.now() / 1000),
@@ -208,7 +249,7 @@ function newScenario() {
     nextGrant: null,
   };
   scenario.gmailRefreshTokens.set(
-    owner.email.toLowerCase(),
+    googleSubFor(owner.email),
     scenario.gmailRefreshToken,
   );
   scenarios.set(scenario.id, scenario);
@@ -352,24 +393,41 @@ const server = createServer(async (req, res) => {
           scenario.workEmail,
           "connected",
           encryptedToken(token, scenario.owner.id),
+          googleSubFor(scenario.workEmail),
         );
         row.connected_at = "2026-10-14T10:00:00.000Z";
         scenario.connections.set(row.id, row);
         return reply(200, {
           user_id: scenario.owner.id,
           connection_id: row.id,
+          google_sub: row.google_sub,
           refresh_token: token,
         });
       }
       if (setup === "grant" && req.method === "POST") {
         // Which account the fake Google chooser picks on the next consent.
+        // An optional `sub` stands in for an account whose address changed
+        // (the old id with a new address) or for a different account that
+        // now owns an address (a new id with a known address).
         const input = JSON.parse(await body(req));
-        if (typeof input.email !== "string" || !input.email.includes("@"))
+        if (
+          typeof input.email !== "string" ||
+          !input.email.includes("@") ||
+          (input.sub !== undefined && typeof input.sub !== "string")
+        )
           return reply(400, { error: "invalid grant fixture" });
-        scenario.nextGrant = input.email;
+        scenario.nextGrant = {
+          email: input.email,
+          sub: input.sub ?? googleSubFor(input.email),
+        };
         return reply(200, {
           email: input.email,
-          refresh_token: gmailRefreshTokenFor(scenario, input.email),
+          sub: scenario.nextGrant.sub,
+          refresh_token: gmailRefreshTokenFor(
+            scenario,
+            input.email,
+            scenario.nextGrant.sub,
+          ),
         });
       }
       if (setup === "revoke-failure" && req.method === "POST") {
@@ -577,13 +635,15 @@ const server = createServer(async (req, res) => {
         callback.pathname !== "/api/gmail/callback"
       )
         return reply(400, { error: "unexpected Gmail authorization" });
-      const email = scenario.nextGrant ?? hint ?? scenario.owner.email;
+      const email = scenario.nextGrant?.email ?? hint ?? scenario.owner.email;
+      const sub = scenario.nextGrant?.sub ?? googleSubFor(email);
       scenario.nextGrant = null;
       const code = `fake-secret-gmail-code-${randomUUID()}`;
       codes.set(code, {
         kind: "gmail",
         scenario,
         email,
+        sub,
         challenge: url.searchParams.get("code_challenge"),
         redirectUri: callback.toString(),
       });
@@ -651,11 +711,15 @@ const server = createServer(async (req, res) => {
       });
       return reply(200, {
         access_token: grant.scenario.gmailAccessToken,
-        refresh_token: gmailRefreshTokenFor(grant.scenario, grant.email),
+        refresh_token: gmailRefreshTokenFor(
+          grant.scenario,
+          grant.email,
+          grant.sub,
+        ),
         scope: connectScope,
         token_type: "Bearer",
         expires_in: 3600,
-        id_token: idTokenFor(grant.email),
+        id_token: idTokenFor(grant.email, grant.sub),
       });
     }
     if (url.pathname === "/revoke" && req.method === "POST") {
@@ -885,7 +949,8 @@ const server = createServer(async (req, res) => {
       req.method === "POST"
     ) {
       // A plain insert; the database assigns the id, keeps one row per
-      // address per user, and caps the number of accounts.
+      // address and one per Google account id per user, and caps the number
+      // of accounts.
       if (url.search !== "")
         return reply(400, { error: "insert filters are unsupported" });
       const row = JSON.parse(await body(req));
@@ -896,6 +961,7 @@ const server = createServer(async (req, res) => {
           (field) => field === "id" || !connectionColumns.includes(field),
         ) ||
         typeof row.google_email !== "string" ||
+        !validGoogleSub(row.google_sub) ||
         typeof row.is_workspace !== "boolean" ||
         !connectionStatuses.includes(row.status) ||
         typeof row.connected_at !== "string" ||
@@ -903,17 +969,11 @@ const server = createServer(async (req, res) => {
       )
         return reply(400, { error: "invalid connection row" });
       const mine = connectionsOf(target.scenario, target.user.id);
-      if (
-        mine.some(
-          (existing) =>
-            existing.google_email.toLowerCase() ===
-            row.google_email.toLowerCase(),
-        )
-      )
-        return reply(409, { error: "gmail_connections_user_email_key" });
+      const conflict = uniqueConflict(mine, row);
+      if (conflict) return reply(409, { error: conflict });
       if (mine.length >= maxConnections)
         return reply(400, { error: "gmail_connections_cap" });
-      const saved = { id: randomUUID(), ...row };
+      const saved = { id: randomUUID(), google_sub: null, ...row };
       target.scenario.connections.set(saved.id, saved);
       return reply(201, undefined);
     }
@@ -1026,7 +1086,7 @@ const server = createServer(async (req, res) => {
         const select = url.searchParams.get("select");
         const projections = {
           encrypted_refresh_token: idFilter === null,
-          "id,google_email": idFilter === null,
+          "id,google_email,google_sub": idFilter === null,
           "google_email,encrypted_refresh_token": idFilter !== null,
           "id,google_email,is_workspace,status,encrypted_refresh_token": true,
         };
@@ -1054,9 +1114,19 @@ const server = createServer(async (req, res) => {
               !connectionColumns.includes(field),
           ) ||
           (data.status !== undefined &&
-            !connectionStatuses.includes(data.status))
+            !connectionStatuses.includes(data.status)) ||
+          (data.google_sub !== undefined && !validGoogleSub(data.google_sub))
         )
           return reply(400, { error: "invalid connection changes" });
+        // The unique indexes hold on update too: the new address or account
+        // id must not already be on another of the user's rows.
+        const others = connectionsOf(target.scenario, target.user.id).filter(
+          (candidate) => !rows.includes(candidate),
+        );
+        for (const row of rows) {
+          const conflict = uniqueConflict(others, { ...row, ...data });
+          if (conflict) return reply(409, { error: conflict });
+        }
         for (const row of rows) Object.assign(row, data);
         return reply(204);
       }

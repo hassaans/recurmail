@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import {
+  ConnectionAddressConflictError,
   ConnectionLimitError,
   type ConnectionStore,
   isConnectionId,
@@ -121,6 +122,7 @@ export function createGmailHandlers(config: {
     },
     async callback(request: Request): Promise<Response> {
       let token: string | undefined;
+      let email: string | undefined;
       try {
         const identity = await config.authenticate(request);
         if (!identity) return clearState(signIn());
@@ -155,11 +157,14 @@ export function createGmailHandlers(config: {
           saved.verifier,
         );
         token = granted.refreshToken;
+        email = granted.email;
         // The account comes from the ID token Google returned with the grant,
         // so a user who picked a different account than the one hinted gets
-        // that account connected, and the notice names it.
+        // that account connected, and the notice names it. Its stable id keys
+        // the row, so the same account under a new address keeps its row.
         await config.store.save({
           user_id: identity.user.id,
+          google_sub: granted.sub,
           google_email: granted.email,
           is_workspace: granted.isWorkspace,
           encrypted_refresh_token: encryptRefreshToken(
@@ -172,8 +177,13 @@ export function createGmailHandlers(config: {
         });
         return clearState(result("connected", granted.email));
       } catch (error) {
-        const limit = error instanceof ConnectionLimitError;
-        if (!limit) console.error("[ERROR] gmail_callback_failed");
+        // The account cap and an address already held by another of the
+        // user's Google accounts are outcomes the user acts on, not faults.
+        let status = "failed";
+        if (error instanceof ConnectionLimitError) status = "limit";
+        else if (error instanceof ConnectionAddressConflictError)
+          status = "address_in_use";
+        if (status === "failed") console.error("[ERROR] gmail_callback_failed");
         // A grant that could not be persisted must not remain active at Google.
         if (token) {
           try {
@@ -182,7 +192,9 @@ export function createGmailHandlers(config: {
             console.error("[ERROR] gmail_compensating_revocation_failed");
           }
         }
-        return clearState(result(limit ? "limit" : "failed"));
+        return clearState(
+          result(status, status === "address_in_use" ? email : undefined),
+        );
       }
     },
     async disconnect(request: Request): Promise<Response> {

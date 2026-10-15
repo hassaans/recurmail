@@ -17,6 +17,8 @@ const issuers = new Set(["https://accounts.google.com", "accounts.google.com"]);
 
 export interface GrantedAccount {
   refreshToken: string;
+  /** Google's stable id for the account (the `sub` claim). It survives an address change. */
+  sub: string;
   /** The verified address of the account that granted gmail.send. */
   email: string;
   isWorkspace: boolean;
@@ -95,7 +97,7 @@ export function grantedAccountFromIdToken(
   idToken: unknown,
   clientId: string,
   now: number,
-): { email: string; isWorkspace: boolean } | null {
+): { sub: string; email: string; isWorkspace: boolean } | null {
   if (typeof idToken !== "string") return null;
   const parts = idToken.split(".");
   if (parts.length !== 3) return null;
@@ -107,7 +109,7 @@ export function grantedAccountFromIdToken(
     throw error;
   }
   if (!claims || typeof claims !== "object") return null;
-  const { iss, aud, exp, email, email_verified } = claims as Record<
+  const { iss, aud, exp, sub, email, email_verified } = claims as Record<
     string,
     unknown
   >;
@@ -116,13 +118,16 @@ export function grantedAccountFromIdToken(
   if (typeof exp !== "number" || !Number.isFinite(exp) || exp * 1000 <= now)
     return null;
   if (email_verified !== true) return null;
+  // The subject is required (OpenID Connect Core 2) and at most 255 ASCII
+  // characters. A token without one cannot name the account.
+  if (typeof sub !== "string" || !/^[\x21-\x7e]{1,255}$/.test(sub)) return null;
   if (
     typeof email !== "string" ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
     email.length > 254
   )
     return null;
-  return { email, isWorkspace: isWorkspaceAddress(email) };
+  return { sub, email, isWorkspace: isWorkspaceAddress(email) };
 }
 
 export function createGoogleProvider(config: {
