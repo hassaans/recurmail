@@ -3,10 +3,7 @@
   margin: -8px;
   background: #f3faf6;
   color: #1b1530;
-  font:
-    17px / 1.6 "DM Sans",
-    system-ui,
-    sans-serif;
+  font: 17px / 1.6 var(--rm-font-body);
 }
 .page * {
   box-sizing: border-box;
@@ -24,10 +21,12 @@
   padding-block: 24px;
 }
 .logo {
-  font:
-    800 26px / 1 "Plus Jakarta Sans",
-    system-ui,
-    sans-serif;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  font: 700 26px / 1 var(--rm-font-display);
+  letter-spacing: -0.03em;
   text-decoration: none;
   color: #1b1530;
 }
@@ -42,7 +41,7 @@
 }
 .main h1,
 .main h2 {
-  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+  font-family: var(--rm-font-display);
   line-height: 1.15;
   letter-spacing: -0.03em;
 }
@@ -94,10 +93,7 @@
   background: #6d3bef;
   color: #fff;
   padding: 16px 24px;
-  font:
-    600 16px / 1.3 "DM Sans",
-    system-ui,
-    sans-serif;
+  font: 600 16px / 1.3 var(--rm-font-body);
   text-decoration: none;
   cursor: pointer;
   max-width: 100%;
@@ -133,6 +129,13 @@
 .footer nav {
   display: flex;
   gap: 12px;
+}
+.footer nav a {
+  color: #3f3856;
+  text-decoration: none;
+}
+.footer nav a:hover {
+  color: #5326d1;
 }
 .footer p {
   margin: 0;

@@ -10,10 +10,7 @@
   min-height: 100vh;
   background: var(--rm-bg);
   color: var(--rm-ink);
-  font:
-    17px / 1.6 "DM Sans",
-    system-ui,
-    sans-serif;
+  font: 17px / 1.6 var(--rm-font-body);
 }
 .page a {
   color: var(--rm-grape-dark);
@@ -38,7 +35,7 @@
 }
 .main h1,
 .main h2 {
-  font-family: "Plus Jakarta Sans", "DM Sans", sans-serif;
+  font-family: var(--rm-font-display);
   line-height: 1.1;
 }
 .main h1 {
@@ -75,10 +72,7 @@
   border-radius: 999px;
   background: #a51e31;
   color: white;
-  font:
-    600 16px "DM Sans",
-    system-ui,
-    sans-serif;
+  font: 600 16px var(--rm-font-body);
   cursor: pointer;
 }
 .main .error {
