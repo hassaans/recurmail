@@ -11,6 +11,10 @@ const nextConfig = {
   // not streamed into <body>: iOS home-screen icons and link previews read <head>.
   htmlLimitedBots: /.*/,
   outputFileTracingRoot: resolve(appDirectory, "../.."),
+  // Dev server only: keep every compiled route in memory. By default it drops
+  // routes after a few other pages load, and the browser tests then wait
+  // seconds for a recompile in the middle of an assertion.
+  onDemandEntries: { maxInactiveAge: 60 * 60 * 1000, pagesBufferLength: 1000 },
   // Callback query strings contain OAuth codes; handler errors use safe events.
   async headers() {
     return [
