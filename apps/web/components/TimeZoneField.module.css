@@ -1,0 +1,117 @@
+.field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--rm-ink, #1b1530);
+}
+.wrap {
+  position: relative;
+  min-width: 0;
+}
+.input {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 10px 40px 10px 14px;
+  border: 1px solid var(--rm-line-strong, #b9cdbf);
+  border-radius: var(--rm-radius-sm, 12px);
+  background: var(--rm-paper, #fff);
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+}
+.input:focus {
+  outline: none;
+  border-color: var(--rm-grape, #6d3bef);
+  box-shadow: 0 0 0 3px rgb(109 59 239 / 22%);
+}
+.inputInvalid {
+  border-color: var(--rm-danger, #e5484d);
+}
+.chevron {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  width: 20px;
+  height: 20px;
+  transform: translateY(-50%);
+  color: var(--rm-muted, #6e6886);
+  pointer-events: none;
+}
+.popup {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--rm-line, #d5e8dd);
+  border-radius: var(--rm-radius-sm, 12px);
+  background: var(--rm-paper, #fff);
+  box-shadow:
+    0 1px 0 rgb(27 21 48 / 4%),
+    0 10px 30px -12px rgb(27 21 48 / 18%);
+}
+.popup[hidden] {
+  display: none;
+}
+.list {
+  display: grid;
+  gap: 1px;
+  padding: 6px;
+}
+.entry {
+  display: grid;
+  gap: 1px;
+}
+.groupHead {
+  padding: 8px 10px 4px;
+  color: var(--rm-muted, #6e6886);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.entry + .entry .groupHead {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rm-line, #d5e8dd);
+}
+.option {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.optionActive {
+  background: var(--rm-grape-soft, #ece4ff);
+}
+.optionName {
+  color: var(--rm-grape-dark, #5326d1);
+}
+.option[aria-selected="true"] .optionName {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--rm-ink, #1b1530);
+}
+.optionMeta {
+  font-size: 13px;
+  color: var(--rm-ink-2, #3f3856);
+}
+.note {
+  margin: 0;
+  padding: 4px 12px 12px;
+  color: var(--rm-ink-2, #3f3856);
+  font-size: 14px;
+}
+.error {
+  margin: 0;
+  color: var(--rm-danger-ink, #8a1c21);
+  font-size: 14px;
+}
