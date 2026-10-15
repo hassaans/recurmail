@@ -1,0 +1,54 @@
+.main {
+  padding-block: 72px 96px;
+  text-align: left;
+}
+.eyebrow {
+  display: inline-block;
+  margin-bottom: 12px;
+  color: var(--rm-grape-dark);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.body {
+  max-width: 560px;
+  color: var(--rm-ink-2, #4a4466);
+  font-size: 18px;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}
+.primary,
+.secondary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 22px;
+  border-radius: var(--rm-radius-pill);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+.primary {
+  border: 1px solid var(--rm-grape);
+  background: var(--rm-grape);
+  color: #fff !important;
+}
+.primary:hover {
+  background: var(--rm-grape-dark);
+}
+.secondary {
+  border: 1px solid var(--rm-line-strong, #b9cdbf);
+  background: var(--rm-paper);
+  color: var(--rm-ink) !important;
+}
+.primary:focus-visible,
+.secondary:focus-visible {
+  outline: 3px solid var(--rm-grape);
+  outline-offset: 3px;
+}
