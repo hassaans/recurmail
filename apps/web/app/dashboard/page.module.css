@@ -212,3 +212,58 @@
 .listBelow {
   margin-top: 28px;
 }
+
+/* Gmail accounts card */
+.accounts h2 {
+  margin-bottom: 12px;
+}
+.accountList {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+}
+.account {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--rm-line);
+  border-radius: var(--rm-radius-sm);
+  background: var(--rm-bg);
+}
+.accountHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.accountActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.accountActions form {
+  margin: 0;
+}
+.accountsFooter {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--rm-line);
+}
+.accountsFooter form {
+  margin: 0;
+}
+.limit {
+  margin: 0;
+  color: var(--rm-muted);
+  font-size: 14px;
+}
+.reconnectAccounts {
+  max-width: 680px;
+}

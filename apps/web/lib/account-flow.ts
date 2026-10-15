@@ -43,21 +43,23 @@ export function createAccountHandler(config: {
       const identity = await config.authenticate(request);
       if (!identity)
         return redirectResponse(config.origin, "/dashboard?auth=required");
+      // Every connected account gets its token revoked. One failure does not
+      // stop the others, and none of them keeps the account alive: the user
+      // asked for deletion, so a revocation outage must not preserve their data.
+      let encrypted: string[] = [];
       try {
-        const encrypted = await config.store.readEncryptedToken(
-          identity.user.id,
-        );
-        if (encrypted) {
-          const token = decryptRefreshToken(
-            encrypted,
-            config.key,
-            identity.user.id,
-          );
-          await config.google.revoke(token);
-        }
+        encrypted = await config.store.readEncryptedTokens(identity.user.id);
       } catch {
-        // The user requested deletion, so a revocation outage must not preserve their data.
         console.error("[ERROR] account_google_revocation_failed");
+      }
+      for (const token of encrypted) {
+        try {
+          await config.google.revoke(
+            decryptRefreshToken(token, config.key, identity.user.id),
+          );
+        } catch {
+          console.error("[ERROR] account_google_revocation_failed");
+        }
       }
       await config.admin.deleteUser(identity.user.id);
       const response = redirectResponse(config.origin, "/?account=deleted");

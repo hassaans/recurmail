@@ -10,6 +10,7 @@ import type {
 const scheduleFields = [
   "id",
   "user_id",
+  "gmail_connection_id",
   "subject",
   "body_text",
   "body_html",
@@ -25,6 +26,7 @@ const scheduleFields = [
   "updated_at",
 ] as const;
 const connectionFields = [
+  "id",
   "user_id",
   "google_email",
   "is_workspace",
@@ -32,6 +34,7 @@ const connectionFields = [
   "connected_at",
 ] as const;
 const updateFields = [
+  "gmail_connection_id",
   "subject",
   "body_text",
   "body_html",
@@ -100,7 +103,11 @@ export function createScheduleStore(config: {
   function schedule(row: Record<string, unknown>, userId: string): ScheduleRow {
     if (row.user_id !== userId) throw new ScheduleStorageError(502);
     return Object.fromEntries(
-      scheduleFields.map((field) => [field, row[field]]),
+      scheduleFields.map((field) => [
+        field,
+        // Rows written before senders existed carry no connection column value.
+        field === "gmail_connection_id" ? (row[field] ?? null) : row[field],
+      ]),
     ) as unknown as ScheduleRow;
   }
 
@@ -189,22 +196,23 @@ export function createScheduleStore(config: {
       );
       return rows.length;
     },
-    async readConnection(userId, accessToken) {
+    async listConnections(userId, accessToken) {
       const rows = await request(
         "gmail_connections",
         {
           user_id: `eq.${userId}`,
           select: connectionFields.join(","),
-          limit: "1",
+          order: "connected_at.asc,id.asc",
         },
         "GET",
         accessToken,
       );
-      if (!rows[0]) return null;
-      if (rows[0].user_id !== userId) throw new ScheduleStorageError(502);
-      return Object.fromEntries(
-        connectionFields.map((field) => [field, rows[0][field]]),
-      ) as unknown as PublicConnection;
+      return rows.map((row) => {
+        if (row.user_id !== userId) throw new ScheduleStorageError(502);
+        return Object.fromEntries(
+          connectionFields.map((field) => [field, row[field]]),
+        ) as unknown as PublicConnection;
+      });
     },
     async history(userId, scheduleId, accessToken) {
       const rows = await request(

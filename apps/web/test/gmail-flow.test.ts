@@ -1,13 +1,24 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConnectionStore, StoredConnection } from "../lib/connections";
+import {
+  ConnectionAddressConflictError,
+  ConnectionLimitError,
+  type ConnectionStore,
+  MAX_GMAIL_CONNECTIONS,
+  type StoredConnection,
+} from "../lib/connections";
 import { decryptRefreshToken, encryptRefreshToken } from "../lib/crypto";
 import { createGmailHandlers } from "../lib/gmail-flow";
-import { createGoogleProvider } from "../lib/google";
+import { createGoogleProvider, isWorkspaceAddress } from "../lib/google";
 
 const origin = "https://app.test";
 const key = randomBytes(32).toString("base64");
 const owner = { id: "owner", email: "owner@gmail.com" };
+const work = "work@company.test";
+const ids = {
+  personal: "11111111-1111-4111-8111-111111111111",
+  work: "22222222-2222-4222-8222-222222222222",
+};
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -25,36 +36,99 @@ const request = (
       ...(method === "POST" ? { Origin: requestOrigin } : {}),
     },
   });
+// The Reconnect form posts the connection id; the Add form posts nothing.
+const connectRequest = (id?: string) =>
+  new Request(`${origin}/api/gmail/connect`, {
+    method: "POST",
+    headers: {
+      Origin: origin,
+      ...(id ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
+    },
+    ...(id ? { body: new URLSearchParams({ id }).toString() } : {}),
+  });
 
-function fixture(email = owner.email) {
-  let connection: StoredConnection | null = null;
+type Saved = StoredConnection & { id: string };
+
+function fixture() {
+  const connections: Saved[] = [];
+  // The first two accounts get known ids so tests can address them.
+  const nextIds = [ids.personal, ids.work];
   const schedules = [
-    { user_id: owner.id, status: "active" },
-    { user_id: "other", status: "active" },
+    { user_id: owner.id, gmail_connection_id: ids.personal, status: "active" },
+    { user_id: owner.id, gmail_connection_id: ids.work, status: "active" },
+    { user_id: "other", gmail_connection_id: ids.personal, status: "active" },
   ];
+  const own = (userId: string) =>
+    connections.filter((connection) => connection.user_id === userId);
   const store: ConnectionStore = {
-    readPublic: vi.fn(async () => connection),
-    readEncryptedToken: vi.fn(
-      async () => connection?.encrypted_refresh_token ?? null,
+    list: vi.fn(async (userId) =>
+      own(userId).map(({ encrypted_refresh_token: _token, ...row }) => row),
+    ),
+    readCredential: vi.fn(async (userId, id) => {
+      const found = own(userId).find((connection) => connection.id === id);
+      return found
+        ? {
+            google_email: found.google_email,
+            encrypted_refresh_token: found.encrypted_refresh_token,
+          }
+        : null;
+    }),
+    readEncryptedTokens: vi.fn(async (userId) =>
+      own(userId).map((connection) => connection.encrypted_refresh_token),
     ),
     save: vi.fn(async (row) => {
-      connection = row;
+      // The same rules as the real store: the account id names the row, and
+      // an address already held by a different account is refused.
+      const wanted = row.google_email.toLowerCase();
+      const mine = own(row.user_id);
+      const existing =
+        mine.find((connection) => connection.google_sub === row.google_sub) ??
+        mine.find(
+          (connection) => connection.google_email.toLowerCase() === wanted,
+        );
+      if (existing) {
+        if (existing.google_sub !== row.google_sub)
+          throw new ConnectionAddressConflictError();
+        Object.assign(existing, row);
+        return;
+      }
+      if (own(row.user_id).length >= MAX_GMAIL_CONNECTIONS)
+        throw new ConnectionLimitError();
+      connections.push({ ...row, id: nextIds.shift() ?? randomUUID() });
     }),
-    pauseSchedules: vi.fn(async (id) => {
+    pauseSchedules: vi.fn(async (userId, id) => {
       for (const row of schedules)
-        if (row.user_id === id) row.status = "paused";
+        if (row.user_id === userId && row.gmail_connection_id === id)
+          row.status = "paused";
     }),
-    delete: vi.fn(async () => {
-      connection = null;
+    delete: vi.fn(async (userId, id) => {
+      const index = connections.findIndex(
+        (connection) => connection.user_id === userId && connection.id === id,
+      );
+      if (index >= 0) connections.splice(index, 1);
     }),
   };
+  // Google tells the callback which account granted the permission; the
+  // fixture starts with the sign-in account and tests swap in others. The
+  // account id follows the address unless a test says otherwise.
+  const subFor = (email: string) => `google-sub-${email.toLowerCase()}`;
+  const granted = (
+    email: string,
+    refreshToken = "fake-gmail-refresh",
+    sub = subFor(email),
+  ) => ({
+    refreshToken,
+    sub,
+    email,
+    isWorkspace: isWorkspaceAddress(email),
+  });
   const google = {
     ...createGoogleProvider({ clientId: "id", clientSecret: "secret" }),
-    exchangeCode: vi.fn(async () => "fake-gmail-refresh"),
+    exchangeCode: vi.fn(async () => granted(owner.email)),
     revoke: vi.fn(async () => {}),
   };
   const authenticate = vi.fn(async () => ({
-    user: { ...owner, email },
+    user: { ...owner },
     accessToken: "fake-access",
   }));
   const now = vi.fn(() => 1000);
@@ -66,25 +140,47 @@ function fixture(email = owner.email) {
     authenticate,
     now,
   });
-  const start = async () => {
-    const response = await handlers.connect(
-      request("/api/gmail/connect", undefined, "POST"),
-    );
+  const start = async (id?: string) => {
+    const response = await handlers.connect(connectRequest(id));
     const cookie = response.headers.get("set-cookie")?.split(";")[0] ?? "";
-    const state = new URL(
-      response.headers.get("location") ?? origin,
-    ).searchParams.get("state");
-    return { response, cookie, state };
+    const location = new URL(response.headers.get("location") ?? origin);
+    const state = location.searchParams.get("state");
+    return { response, cookie, state, location };
+  };
+  // Runs the whole add flow for one granted account.
+  const connect = async (
+    email: string,
+    refreshToken?: string,
+    sub?: string,
+  ) => {
+    const { cookie, state } = await start();
+    google.exchangeCode.mockResolvedValueOnce(
+      granted(email, refreshToken, sub),
+    );
+    return handlers.callback(
+      request(`/api/gmail/callback?state=${state}&code=fake-code`, cookie),
+    );
   };
   return {
     handlers,
     start,
+    connect,
+    granted,
+    subFor,
     store,
     google,
     authenticate,
     now,
     schedules,
-    connection: () => connection,
+    connections,
+    connection: (id = ids.personal) =>
+      connections.find((connection) => connection.id === id) ?? null,
+    // Marks a saved account the way the sender does after an invalid_grant.
+    needsReconnect(id = ids.personal) {
+      const connection = connections.find((row) => row.id === id);
+      if (!connection) throw new Error(`No connection ${id}`);
+      connection.status = "needs_reconnect";
+    },
   };
 }
 
@@ -148,6 +244,7 @@ describe("Gmail connection HTTP flow with fake providers and persistence", () =>
       expect(f.google.exchangeCode).not.toHaveBeenCalled();
     },
   );
+
   it.each(["connect", "callback", "disconnect"] as const)(
     "logs %s failures without unverified identity, credentials or provider diagnostics",
     async (operation) => {
@@ -157,7 +254,7 @@ describe("Gmail connection HTTP flow with fake providers and persistence", () =>
       f.authenticate.mockRejectedValue(new Error(secret));
       const response = await f.handlers[operation](
         request(
-          `/api/gmail/${operation}?code=oauth-code`,
+          `/api/gmail/${operation}?code=oauth-code&id=${ids.personal}`,
           undefined,
           operation === "callback" ? "GET" : "POST",
         ),
@@ -173,26 +270,25 @@ describe("Gmail connection HTTP flow with fake providers and persistence", () =>
       );
     },
   );
-  it("connects, stores only owner-bound ciphertext, then revokes, deletes and pauses only the owner's schedules", async () => {
+
+  it("adds the account Google granted through the chooser, names it, and stores only owner-bound ciphertext", async () => {
     const f = fixture();
-    const { response, cookie, state } = await f.start();
+    const { response, cookie, state, location } = await f.start();
     expect(response.status).toBe(303);
     expect(response.headers.get("set-cookie")).toMatch(/HttpOnly/);
     expect(response.headers.get("set-cookie")).toMatch(/Secure/);
     expect(response.headers.get("set-cookie")).toMatch(/SameSite=Lax/);
-    expect(
-      new URL(response.headers.get("location") ?? origin).searchParams.get(
-        "login_hint",
-      ),
-    ).toBe(owner.email);
+    expect(location.searchParams.get("prompt")).toBe("consent select_account");
+    expect(location.searchParams.has("login_hint")).toBe(false);
     const callback = await f.handlers.callback(
       request(`/api/gmail/callback?state=${state}&code=fake-code`, cookie),
     );
     expect(callback.headers.get("location")).toBe(
-      `${origin}/dashboard?gmail=connected`,
+      `${origin}/dashboard?gmail=connected&email=owner%40gmail.com`,
     );
     expect(callback.headers.get("set-cookie")).toContain("Max-Age=0");
     expect(f.connection()).toMatchObject({
+      id: ids.personal,
       user_id: owner.id,
       google_email: owner.email,
       is_workspace: false,
@@ -203,19 +299,203 @@ describe("Gmail connection HTTP flow with fake providers and persistence", () =>
     expect(decryptRefreshToken(encrypted, key, owner.id)).toBe(
       "fake-gmail-refresh",
     );
+    expect(() => decryptRefreshToken(encrypted, key, "other")).toThrow();
     expect(await callback.text()).not.toContain("fake-gmail-refresh");
-    const disconnect = await f.handlers.disconnect(
-      request("/api/gmail/disconnect", undefined, "POST"),
+  });
+
+  it("keeps every account the user adds as its own connection", async () => {
+    const f = fixture();
+    await f.connect(owner.email);
+    const second = await f.connect(work, "fake-work-refresh");
+    expect(second.headers.get("location")).toBe(
+      `${origin}/dashboard?gmail=connected&email=work%40company.test`,
     );
-    expect(disconnect.headers.get("location")).toBe(
-      `${origin}/dashboard?gmail=disconnected`,
+    expect(f.connections.map((row) => [row.id, row.google_email])).toEqual([
+      [ids.personal, owner.email],
+      [ids.work, work],
+    ]);
+    expect(f.connection(ids.work)).toMatchObject({
+      is_workspace: true,
+      status: "connected",
+    });
+    expect(
+      decryptRefreshToken(
+        f.connection(ids.work)?.encrypted_refresh_token ?? "",
+        key,
+        owner.id,
+      ),
+    ).toBe("fake-work-refresh");
+  });
+
+  it("reconnecting a specific account hints it to Google and refreshes its token without a duplicate", async () => {
+    const f = fixture();
+    await f.connect(owner.email);
+    await f.connect(work);
+    f.needsReconnect(ids.work);
+    const { cookie, state, location } = await f.start(ids.work);
+    expect(location.searchParams.get("login_hint")).toBe(work);
+    expect(location.searchParams.get("prompt")).toBe("consent");
+    f.google.exchangeCode.mockResolvedValueOnce(
+      f.granted(work, "fake-work-refresh-2"),
+    );
+    const callback = await f.handlers.callback(
+      request(`/api/gmail/callback?state=${state}&code=fake-code`, cookie),
+    );
+    expect(callback.headers.get("location")).toBe(
+      `${origin}/dashboard?gmail=connected&email=work%40company.test`,
+    );
+    expect(f.connections).toHaveLength(2);
+    expect(f.connection(ids.work)).toMatchObject({ status: "connected" });
+    expect(
+      decryptRefreshToken(
+        f.connection(ids.work)?.encrypted_refresh_token ?? "",
+        key,
+        owner.id,
+      ),
+    ).toBe("fake-work-refresh-2");
+  });
+
+  it("saves a different account than the one hinted as its own connection and says which one", async () => {
+    const f = fixture();
+    await f.connect(owner.email);
+    f.needsReconnect();
+    const { cookie, state, location } = await f.start(ids.personal);
+    expect(location.searchParams.get("login_hint")).toBe(owner.email);
+    f.google.exchangeCode.mockResolvedValueOnce(
+      f.granted(work, "fake-work-refresh"),
+    );
+    const callback = await f.handlers.callback(
+      request(`/api/gmail/callback?state=${state}&code=fake-code`, cookie),
+    );
+    expect(callback.headers.get("location")).toBe(
+      `${origin}/dashboard?gmail=connected&email=work%40company.test`,
+    );
+    // The hinted account is untouched: still waiting for its own reconnect.
+    expect(f.connection()).toMatchObject({
+      google_email: owner.email,
+      status: "needs_reconnect",
+    });
+    expect(f.connection(ids.work)).toMatchObject({
+      google_email: work,
+      status: "connected",
+    });
+  });
+
+  it("keeps the same connection and its schedules when Google reports the account under a new address", async () => {
+    const f = fixture();
+    await f.connect(owner.email);
+    await f.connect(work);
+    f.needsReconnect(ids.personal);
+    const { cookie, state } = await f.start(ids.personal);
+    // Same Google account id, new address, fresh token.
+    f.google.exchangeCode.mockResolvedValueOnce(
+      f.granted("new-name@gmail.com", "fake-refresh-2", f.subFor(owner.email)),
+    );
+    const callback = await f.handlers.callback(
+      request(`/api/gmail/callback?state=${state}&code=fake-code`, cookie),
+    );
+    expect(callback.headers.get("location")).toBe(
+      `${origin}/dashboard?gmail=connected&email=new-name%40gmail.com`,
+    );
+    expect(f.connections).toHaveLength(2);
+    expect(f.connection()).toMatchObject({
+      google_email: "new-name@gmail.com",
+      google_sub: f.subFor(owner.email),
+      status: "connected",
+    });
+    expect(
+      decryptRefreshToken(
+        f.connection()?.encrypted_refresh_token ?? "",
+        key,
+        owner.id,
+      ),
+    ).toBe("fake-refresh-2");
+    expect(f.schedules.filter((row) => row.user_id === owner.id)).toEqual([
+      {
+        user_id: owner.id,
+        gmail_connection_id: ids.personal,
+        status: "active",
+      },
+      { user_id: owner.id, gmail_connection_id: ids.work, status: "active" },
+    ]);
+  });
+
+  it("refuses an address that a different Google account of the user's already holds, says which, and revokes the grant", async () => {
+    const f = fixture();
+    await f.connect(owner.email);
+    const callback = await f.connect(
+      "Owner@gmail.com",
+      "fake-refresh-other",
+      "google-sub-someone-else",
+    );
+    expect(callback.headers.get("location")).toBe(
+      `${origin}/dashboard?gmail=address_in_use&email=Owner%40gmail.com`,
+    );
+    expect(callback.headers.get("set-cookie")).toMatch(/rm_gmail_state=;/);
+    // The row that holds the address keeps its account, token and status.
+    expect(f.connections).toHaveLength(1);
+    expect(f.connection()).toMatchObject({
+      google_email: owner.email,
+      google_sub: f.subFor(owner.email),
+      status: "connected",
+    });
+    expect(
+      decryptRefreshToken(
+        f.connection()?.encrypted_refresh_token ?? "",
+        key,
+        owner.id,
+      ),
+    ).toBe("fake-gmail-refresh");
+    expect(f.google.revoke).toHaveBeenCalledWith("fake-refresh-other");
+    expect(console.error).not.toHaveBeenCalledWith(
+      "[ERROR] gmail_callback_failed",
+    );
+  });
+
+  it("ignores a reconnect id the user does not own and adds the granted account instead", async () => {
+    const f = fixture();
+    const { location, cookie, state } = await f.start(randomUUID());
+    expect(location.searchParams.has("login_hint")).toBe(false);
+    expect(location.searchParams.get("prompt")).toBe("consent select_account");
+    await f.handlers.callback(
+      request(`/api/gmail/callback?state=${state}&code=fake-code`, cookie),
+    );
+    expect(f.connections.map((row) => row.google_email)).toEqual([owner.email]);
+  });
+
+  it(`refuses to add an account past ${MAX_GMAIL_CONNECTIONS} before sending the user to Google, but still reconnects one`, async () => {
+    const f = fixture();
+    for (let index = 0; index < MAX_GMAIL_CONNECTIONS; index++)
+      await f.connect(`account${index}@company.test`);
+    expect(f.connections).toHaveLength(MAX_GMAIL_CONNECTIONS);
+    const { response } = await f.start();
+    expect(response.headers.get("location")).toBe(
+      `${origin}/dashboard?gmail=limit`,
+    );
+    expect(response.headers.get("set-cookie")).toBeNull();
+    const reconnect = await f.start(ids.personal);
+    expect(
+      new URL(reconnect.response.headers.get("location") ?? origin).origin,
+    ).toBe("https://accounts.google.com");
+    expect(reconnect.location.searchParams.get("login_hint")).toBe(
+      "account0@company.test",
+    );
+  });
+
+  it("reports the limit when the callback finds it reached, and revokes the grant it cannot keep", async () => {
+    const f = fixture();
+    const { cookie, state } = await f.start();
+    vi.mocked(f.store.save).mockRejectedValueOnce(new ConnectionLimitError());
+    const result = await f.handlers.callback(
+      request(`/api/gmail/callback?state=${state}&code=fake-code`, cookie),
+    );
+    expect(result.headers.get("location")).toBe(
+      `${origin}/dashboard?gmail=limit`,
     );
     expect(f.google.revoke).toHaveBeenCalledWith("fake-gmail-refresh");
-    expect(f.connection()).toBeNull();
-    expect(f.schedules).toEqual([
-      { user_id: "owner", status: "paused" },
-      { user_id: "other", status: "active" },
-    ]);
+    expect(console.error).not.toHaveBeenCalledWith(
+      "[ERROR] gmail_callback_failed",
+    );
   });
 
   it.each([
@@ -223,16 +503,15 @@ describe("Gmail connection HTTP flow with fake providers and persistence", () =>
     "someone@GMAIL.COM",
     "someone@googlemail.com",
   ])(
-    "classifies the signed-in account %s without another scope",
+    "records the account that granted the permission, %s, not the sign-in address",
     async (email) => {
-      const f = fixture(email);
-      const { cookie, state } = await f.start();
-      await f.handlers.callback(
-        request(`/api/gmail/callback?state=${state}&code=code`, cookie),
-      );
-      expect(f.connection()?.is_workspace).toBe(
-        email === "someone@workspace.test",
-      );
+      const f = fixture();
+      await f.connect(email);
+      expect(f.connection()).toMatchObject({
+        google_email: email,
+        is_workspace: email === "someone@workspace.test",
+      });
+      expect(f.connections).toHaveLength(1);
     },
   );
 
@@ -253,38 +532,44 @@ describe("Gmail connection HTTP flow with fake providers and persistence", () =>
     expect(result.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 
-  it.each([
-    "missing",
-    "mismatch",
-    "expired",
-    "tampered",
-    "different-user",
-    "different-email",
-  ])("rejects %s OAuth state before exchange", async (kind) => {
+  it.each(["missing", "mismatch", "expired", "tampered", "different-user"])(
+    "rejects %s OAuth state before exchange",
+    async (kind) => {
+      const f = fixture();
+      let { cookie, state } = await f.start();
+      if (kind === "missing") cookie = "";
+      if (kind === "mismatch") state = "forged";
+      if (kind === "expired") f.now.mockReturnValue(700000);
+      if (kind === "tampered") cookie = "rm_gmail_state=v1.bad.state.cookie";
+      if (kind === "different-user")
+        f.authenticate.mockResolvedValue({
+          user: { id: "other", email: owner.email },
+          accessToken: "fake-access",
+        });
+      const result = await f.handlers.callback(
+        request(`/api/gmail/callback?state=${state}&code=code`, cookie),
+      );
+      expect(result.headers.get("location")).toBe(
+        `${origin}/dashboard?gmail=failed`,
+      );
+      expect(f.google.exchangeCode).not.toHaveBeenCalled();
+      expect(f.store.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it("binds state to the signed-in user, not their sign-in address", async () => {
     const f = fixture();
-    let { cookie, state } = await f.start();
-    if (kind === "missing") cookie = "";
-    if (kind === "mismatch") state = "forged";
-    if (kind === "expired") f.now.mockReturnValue(700000);
-    if (kind === "tampered") cookie = "rm_gmail_state=v1.bad.state.cookie";
-    if (kind === "different-user")
-      f.authenticate.mockResolvedValue({
-        user: { id: "other", email: owner.email },
-        accessToken: "fake-access",
-      });
-    if (kind === "different-email")
-      f.authenticate.mockResolvedValue({
-        user: { ...owner, email: "other@gmail.com" },
-        accessToken: "fake-access",
-      });
+    const { cookie, state } = await f.start();
+    f.authenticate.mockResolvedValue({
+      user: { id: owner.id, email: "renamed@gmail.com" },
+      accessToken: "fake-access",
+    });
     const result = await f.handlers.callback(
       request(`/api/gmail/callback?state=${state}&code=code`, cookie),
     );
     expect(result.headers.get("location")).toBe(
-      `${origin}/dashboard?gmail=failed`,
+      `${origin}/dashboard?gmail=connected&email=owner%40gmail.com`,
     );
-    expect(f.google.exchangeCode).not.toHaveBeenCalled();
-    expect(f.store.save).not.toHaveBeenCalled();
   });
 
   it.each(["connect", "disconnect"] as const)(
@@ -295,7 +580,12 @@ describe("Gmail connection HTTP flow with fake providers and persistence", () =>
         expect(
           (
             await f.handlers[method](
-              request(`/api/gmail/${method}`, undefined, "POST", attacker),
+              request(
+                `/api/gmail/${method}?id=${ids.personal}`,
+                undefined,
+                "POST",
+                attacker,
+              ),
             )
           ).status,
         ).toBe(403);
@@ -312,7 +602,7 @@ describe("Gmail connection HTTP flow with fake providers and persistence", () =>
       f.authenticate.mockResolvedValue(null as never);
       const response = await f.handlers[method](
         request(
-          `/api/gmail/${method}`,
+          `/api/gmail/${method}?id=${ids.personal}`,
           undefined,
           method === "callback" ? "GET" : "POST",
         ),
@@ -348,14 +638,56 @@ describe("Gmail connection HTTP flow with fake providers and persistence", () =>
     },
   );
 
+  it("disconnects one account by id: pauses only its schedules, revokes its token and keeps the others", async () => {
+    const f = fixture();
+    await f.connect(owner.email);
+    await f.connect(work, "fake-work-refresh");
+    const disconnect = await f.handlers.disconnect(
+      request(`/api/gmail/disconnect?id=${ids.personal}`, undefined, "POST"),
+    );
+    expect(disconnect.headers.get("location")).toBe(
+      `${origin}/dashboard?gmail=disconnected&email=owner%40gmail.com`,
+    );
+    expect(f.google.revoke).toHaveBeenCalledTimes(1);
+    expect(f.google.revoke).toHaveBeenCalledWith("fake-gmail-refresh");
+    expect(f.connections.map((row) => row.google_email)).toEqual([work]);
+    expect(f.schedules).toEqual([
+      {
+        user_id: owner.id,
+        gmail_connection_id: ids.personal,
+        status: "paused",
+      },
+      { user_id: owner.id, gmail_connection_id: ids.work, status: "active" },
+      { user_id: "other", gmail_connection_id: ids.personal, status: "active" },
+    ]);
+  });
+
+  it.each(["", "not-a-uuid", "../owner"])(
+    "refuses a disconnect with the connection id %j without touching anything",
+    async (id) => {
+      const f = fixture();
+      await f.connect(owner.email);
+      const result = await f.handlers.disconnect(
+        request(
+          `/api/gmail/disconnect${id ? `?id=${encodeURIComponent(id)}` : ""}`,
+          undefined,
+          "POST",
+        ),
+      );
+      expect(result.headers.get("location")).toBe(
+        `${origin}/dashboard?gmail=disconnect_failed`,
+      );
+      expect(f.store.pauseSchedules).not.toHaveBeenCalled();
+      expect(f.google.revoke).not.toHaveBeenCalled();
+      expect(f.connections).toHaveLength(1);
+    },
+  );
+
   it.each(["pause", "revoke", "delete", "decrypt"])(
     "keeps a retryable credential when disconnect fails at %s",
     async (kind) => {
       const f = fixture();
-      const { cookie, state } = await f.start();
-      await f.handlers.callback(
-        request(`/api/gmail/callback?state=${state}&code=code`, cookie),
-      );
+      await f.connect(owner.email);
       if (kind === "pause")
         vi.mocked(f.store.pauseSchedules).mockRejectedValue(
           new Error("fake-secret"),
@@ -365,11 +697,12 @@ describe("Gmail connection HTTP flow with fake providers and persistence", () =>
       if (kind === "delete")
         vi.mocked(f.store.delete).mockRejectedValue(new Error("fake-secret"));
       if (kind === "decrypt")
-        vi.mocked(f.store.readEncryptedToken).mockResolvedValue(
-          encryptRefreshToken("token", key, "other"),
-        );
+        vi.mocked(f.store.readCredential).mockResolvedValue({
+          google_email: owner.email,
+          encrypted_refresh_token: encryptRefreshToken("token", key, "other"),
+        });
       const result = await f.handlers.disconnect(
-        request("/api/gmail/disconnect", undefined, "POST"),
+        request(`/api/gmail/disconnect?id=${ids.personal}`, undefined, "POST"),
       );
       expect(result.headers.get("location")).toBe(
         `${origin}/dashboard?gmail=disconnect_failed`,
@@ -384,24 +717,23 @@ describe("Gmail connection HTTP flow with fake providers and persistence", () =>
     },
   );
 
-  it("makes disconnect idempotent when there is no stored credential", async () => {
+  it("makes disconnect idempotent when the account is already gone", async () => {
     const f = fixture();
     const result = await f.handlers.disconnect(
-      request("/api/gmail/disconnect", undefined, "POST"),
+      request(`/api/gmail/disconnect?id=${ids.personal}`, undefined, "POST"),
     );
     expect(result.headers.get("location")).toBe(
       `${origin}/dashboard?gmail=disconnected`,
     );
     expect(f.google.revoke).not.toHaveBeenCalled();
+    expect(f.store.delete).not.toHaveBeenCalled();
     expect(f.schedules[0].status).toBe("paused");
   });
 
   it("fails safely if connection initialization cannot encrypt state", async () => {
     const f = fixture();
     f.authenticate.mockRejectedValue(new Error("fake-secret"));
-    const response = await f.handlers.connect(
-      request("/api/gmail/connect", undefined, "POST"),
-    );
+    const response = await f.handlers.connect(connectRequest());
     expect(response.headers.get("location")).toBe(
       `${origin}/dashboard?gmail=failed`,
     );

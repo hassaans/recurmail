@@ -34,6 +34,7 @@ function minutesAgo(minutes: number): string {
 
 function sender(overrides: Partial<TestSender> = {}): TestSender {
   return {
+    id: connectionId,
     email: "sender@gmail.com",
     is_workspace: false,
     status: "connected",
@@ -109,8 +110,12 @@ function fakeStore(
     release: vi.fn(async (userId: string, id: string) => {
       if (rows.get(id)?.userId === userId) rows.delete(id);
     }),
-    markReconnectNeeded: vi.fn(async (userId: string) => {
-      if (userId === owner.id && connection?.status === "connected")
+    markReconnectNeeded: vi.fn(async (userId: string, id: string) => {
+      if (
+        userId === owner.id &&
+        id === connectionId &&
+        connection?.status === "connected"
+      )
         connection.status = "needs_reconnect";
     }),
   };
@@ -421,9 +426,12 @@ describe("POST /api/schedules/test", () => {
     expect(store.release).toHaveBeenCalledTimes(1);
     expect(store.release).toHaveBeenCalledWith(owner.id, expect.any(String));
     expect(store.rows.size).toBe(0);
-    // The dead token is recorded: the connection no longer looks healthy.
+    // The dead token is recorded against the account that was used.
     expect(store.markReconnectNeeded).toHaveBeenCalledTimes(1);
-    expect(store.markReconnectNeeded).toHaveBeenCalledWith(owner.id);
+    expect(store.markReconnectNeeded).toHaveBeenCalledWith(
+      owner.id,
+      connectionId,
+    );
     expect(store.connectionStatus()).toBe("needs_reconnect");
   });
 
@@ -444,7 +452,10 @@ describe("POST /api/schedules/test", () => {
       expect((await response.json()).error.code).toBe(
         "gmail_reconnect_required",
       );
-      expect(store.markReconnectNeeded).toHaveBeenCalledWith(owner.id);
+      expect(store.markReconnectNeeded).toHaveBeenCalledWith(
+        owner.id,
+        connectionId,
+      );
       expect(store.release).toHaveBeenCalledTimes(1);
       expect(error.mock.calls).toEqual([
         ["[ERROR] test_send_reconnect_mark_failed"],
@@ -600,12 +611,13 @@ describe("POST /api/schedules/test", () => {
 });
 
 describe("resolveTestSender", () => {
-  it("returns the user's single connection and verifies ownership of an explicit id", async () => {
+  it("returns the chosen connection when the user owns it, else their default", async () => {
     const connection = sender();
     const store = fakeStore({ connection });
     await expect(resolveTestSender(owner.id, undefined, store)).resolves.toBe(
       connection,
     );
+    expect(store.findConnection).toHaveBeenLastCalledWith(owner.id, undefined);
     await expect(
       resolveTestSender(owner.id, connectionId, store),
     ).resolves.toBe(connection);
@@ -657,6 +669,7 @@ describe("test send store", () => {
     const store = storeWith(fetcher);
     await expect(store.findConnection(owner.id, connectionId)).resolves.toEqual(
       {
+        id: connectionId,
         email: "sender@gmail.com",
         is_workspace: true,
         status: "connected",
@@ -668,7 +681,7 @@ describe("test send store", () => {
       id: reservation,
     });
     await store.release(owner.id, reservation);
-    await store.markReconnectNeeded(owner.id);
+    await store.markReconnectNeeded(owner.id, connectionId);
     const calls = fetcher.mock.calls.map(([input, init]) => ({
       url: new URL(input),
       init,
@@ -683,6 +696,9 @@ describe("test send store", () => {
     ]);
     expect(calls[0].url.searchParams.get("user_id")).toBe(`eq.${owner.id}`);
     expect(calls[0].url.searchParams.get("id")).toBe(`eq.${connectionId}`);
+    // A chosen account is read whatever its status, so the user hears about
+    // the account they picked rather than silently sending from another.
+    expect(calls[0].url.searchParams.get("status")).toBeNull();
     expect(calls[0].url.searchParams.get("select")).toBe(
       "id,google_email,is_workspace,status,encrypted_refresh_token",
     );
@@ -702,12 +718,56 @@ describe("test send store", () => {
       "return=minimal",
     );
     expect(calls[3].url.search).toBe("");
-    expect(calls[3].init.body).toBe(JSON.stringify({ p_user_id: owner.id }));
+    expect(calls[3].init.body).toBe(
+      JSON.stringify({ p_user_id: owner.id, p_connection_id: connectionId }),
+    );
     for (const { init } of calls) {
       const headers = init.headers as Record<string, string>;
       expect(headers.apikey).toBe("fake-secret-key");
       expect(headers.Authorization).toBeUndefined();
     }
+  });
+
+  it("falls back to the user's oldest connected account when no id is given", async () => {
+    const fetcher = vi.fn(async (_input: string) =>
+      Response.json([
+        {
+          id: otherConnectionId,
+          google_email: "oldest@gmail.com",
+          is_workspace: false,
+          status: "connected",
+          encrypted_refresh_token: "ciphertext",
+        },
+      ]),
+    );
+    const store = storeWith(fetcher);
+    await expect(store.findConnection(owner.id)).resolves.toMatchObject({
+      id: otherConnectionId,
+      email: "oldest@gmail.com",
+    });
+    const url = new URL(fetcher.mock.calls[0][0]);
+    expect(url.searchParams.get("user_id")).toBe(`eq.${owner.id}`);
+    expect(url.searchParams.get("id")).toBeNull();
+    expect(url.searchParams.get("status")).toBe("eq.connected");
+    expect(url.searchParams.get("order")).toBe("connected_at.asc,id.asc");
+    expect(url.searchParams.get("limit")).toBe("1");
+  });
+
+  it("treats a connection row without an id as a storage failure", async () => {
+    const store = storeWith(
+      vi.fn(async () =>
+        Response.json([
+          {
+            google_email: "sender@gmail.com",
+            status: "connected",
+            encrypted_refresh_token: "ciphertext",
+          },
+        ]),
+      ),
+    );
+    await expect(store.findConnection(owner.id)).rejects.toThrow(
+      "Test send storage failed: read_connection",
+    );
   });
 
   it("passes a refusal through with the oldest send in the window", async () => {
@@ -757,7 +817,9 @@ describe("test send store", () => {
     await expect(store.findConnection(owner.id)).rejects.toThrow(
       "Test send storage failed: read_connection",
     );
-    await expect(store.markReconnectNeeded(owner.id)).rejects.toThrow(
+    await expect(
+      store.markReconnectNeeded(owner.id, connectionId),
+    ).rejects.toThrow(
       "Test send storage failed: mark_test_send_reconnect_needed",
     );
   });

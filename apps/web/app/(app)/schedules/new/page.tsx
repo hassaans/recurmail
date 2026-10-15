@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import AppShell from "../../../../components/AppShell";
 import ScheduleEditor from "../../../../components/ScheduleEditor";
 import { configuredRuntime } from "../../../../lib/runtime";
+import { senderAccounts } from "../../../../lib/schedule-summary";
 
 export const metadata = {
   title: "New schedule | RecurMail",
@@ -16,13 +17,16 @@ export default async function NewSchedulePage() {
         new Request("http://schedules.internal", { headers: await headers() }),
       )
     : { kind: "signed_out" as const };
-  if (state.kind !== "signed_in" || state.connection?.status !== "connected")
+  if (
+    state.kind !== "signed_in" ||
+    !state.connections.some((connection) => connection.status === "connected")
+  )
     redirect("/dashboard");
   return (
     <AppShell email={state.user.email} active="schedules">
       <ScheduleEditor
         userEmail={state.user.email}
-        senderEmail={state.connection?.google_email ?? null}
+        accounts={senderAccounts(state.connections)}
       />
     </AppShell>
   );

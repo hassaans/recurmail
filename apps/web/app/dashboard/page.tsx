@@ -2,16 +2,18 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import AppShell from "../../components/AppShell";
-import ConfirmForm from "../../components/ConfirmForm";
 import controls from "../../components/controls.module.css";
 import DashboardNotices, {
   type DashboardNotice,
 } from "../../components/DashboardNotices";
+import GmailAccounts from "../../components/GmailAccounts";
 import ScheduleList from "../../components/ScheduleList";
+import { MAX_GMAIL_CONNECTIONS } from "../../lib/connections";
 import { configuredRuntime } from "../../lib/runtime";
 import { finishedInfo } from "../../lib/schedule-finished";
 import {
   type ScheduleSummary,
+  senderAccounts,
   summarizeSchedule,
 } from "../../lib/schedule-summary";
 import type { ScheduleRow } from "../../lib/schedules";
@@ -22,45 +24,76 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-// A completed action reads as a success; a declined or failed one as a warning.
-const gmailMessages: Record<string, DashboardNotice> = {
-  denied: {
-    tone: "warn",
-    text: "Gmail permission was declined. RecurMail needs permission to send your scheduled emails. It cannot read your inbox. You can try again when you are ready.",
-  },
-  failed: {
-    tone: "warn",
-    text: "Gmail could not be connected. Please try again and use the same Google account you used to sign in.",
-  },
-  connected: {
-    tone: "success",
-    text: "Gmail is connected. RecurMail can send your scheduled emails.",
-  },
-  disconnected: {
-    tone: "success",
-    text: "Gmail is disconnected. All your schedules are paused.",
-  },
-  disconnect_failed: {
-    tone: "warn",
-    text: "Disconnect could not finish. Please try again. Your Gmail connection will stay here until Google revocation and removal are complete.",
-  },
-};
+// A completed action reads as a success; a declined or failed one as a
+// warning. The connect and disconnect routes name the account they acted on.
+function gmailMessage(
+  status: string,
+  email: string | null,
+): DashboardNotice | undefined {
+  switch (status) {
+    case "denied":
+      return {
+        tone: "warn",
+        text: "Gmail permission was declined. RecurMail needs permission to send your scheduled emails. It cannot read your inbox. You can try again when you are ready.",
+      };
+    case "failed":
+      return {
+        tone: "warn",
+        text: "Gmail could not be connected. Please try again.",
+      };
+    case "limit":
+      return {
+        tone: "warn",
+        text: `You can connect up to ${MAX_GMAIL_CONNECTIONS} Gmail accounts. Disconnect one to add another.`,
+      };
+    case "address_in_use":
+      return {
+        tone: "warn",
+        text: email
+          ? `${email} is already connected here as a different Google account. Disconnect that one first if you want to replace it.`
+          : "That address is already connected here as a different Google account. Disconnect that one first if you want to replace it.",
+      };
+    case "connected":
+      return {
+        tone: "success",
+        text: email
+          ? `Connected ${email}. RecurMail can send your scheduled emails from it.`
+          : "Gmail is connected. RecurMail can send your scheduled emails.",
+      };
+    case "disconnected":
+      return {
+        tone: "success",
+        text: email
+          ? `Disconnected ${email}. Its schedules are paused.`
+          : "Gmail is disconnected. Its schedules are paused.",
+      };
+    case "disconnect_failed":
+      return {
+        tone: "warn",
+        text: "Disconnect could not finish. Please try again. The Gmail account will stay here until Google revocation and removal are complete.",
+      };
+    default:
+      return undefined;
+  }
+}
 
 type SearchParams = {
   gmail?: string;
+  email?: string;
   auth?: string;
   warning?: string;
   saved?: string;
 };
 
-const disconnectDialog = {
-  title: "Disconnect Gmail?",
-  description:
-    "RecurMail will give up its permission to send from this Gmail account and pause every schedule. You can connect again at any time.",
-  confirmLabel: "Disconnect Gmail",
-  pendingLabel: "Disconnecting…",
-  action: "/api/gmail/disconnect",
-} as const;
+// The notice repeats the address the server put in the redirect. Anything
+// that does not look like one is dropped rather than echoed.
+function noticeEmail(value: string | undefined): string | null {
+  return typeof value === "string" &&
+    value.length <= 254 &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+    ? value
+    : null;
+}
 
 export default async function Dashboard({
   searchParams,
@@ -77,13 +110,13 @@ export default async function Dashboard({
     : { kind: "signed_out" as const };
   if (state.kind === "refresh") redirect("/auth/refresh");
   const user = state.kind === "signed_in" ? state.user : null;
-  const connection = state.kind === "signed_in" ? state.connection : null;
-  const connectionStatus =
-    connection?.status === "connected" ||
-    connection?.status === "needs_reconnect"
-      ? connection.status
-      : "disconnected";
-  const connected = connectionStatus === "connected";
+  const connections = state.kind === "signed_in" ? state.connections : [];
+  const accounts = senderAccounts(connections);
+  const connected = connections.some(
+    (connection) => connection.status === "connected",
+  );
+  // Accounts exist but none can send: every one of them needs reconnecting.
+  const needsReconnect = connections.length > 0 && !connected;
 
   let schedules: ScheduleSummary[] = [];
   let loadError = false;
@@ -129,6 +162,7 @@ export default async function Dashboard({
             finished?.kind === "count"
               ? { ...finished, sent: await sentCount(row.id) }
               : finished,
+            accounts,
           );
         }),
       );
@@ -139,8 +173,10 @@ export default async function Dashboard({
   }
 
   const notices: DashboardNotice[] = [];
-  const gmailMessage = params.gmail ? gmailMessages[params.gmail] : undefined;
-  if (gmailMessage) notices.push(gmailMessage);
+  const gmailNotice = params.gmail
+    ? gmailMessage(params.gmail, noticeEmail(params.email))
+    : undefined;
+  if (gmailNotice) notices.push(gmailNotice);
   if (params.auth === "failed")
     notices.push({
       tone: "warn",
@@ -154,8 +190,8 @@ export default async function Dashboard({
 
   return (
     <AppShell email={user?.email} active="schedules">
-      {/* Until Gmail is connected the Connect or Reconnect card is the only
-          call to action, so the New schedule button is not rendered. */}
+      {/* Until a Gmail account can send, the Connect or Reconnect card is the
+          only call to action, so the New schedule button is not rendered. */}
       {user ? (
         <header className={styles.pageHeader}>
           <div>
@@ -191,8 +227,8 @@ export default async function Dashboard({
           aria-label="Sign in"
         >
           <p>
-            Sign in with Google, then connect that same account to send
-            scheduled emails from your own Gmail.
+            Sign in with Google, then connect the Gmail accounts you want to
+            send scheduled emails from.
           </p>
           <a className={controls.primary} href="/auth/signin">
             Sign in with Google
@@ -200,40 +236,38 @@ export default async function Dashboard({
         </section>
       ) : null}
 
-      {user && connection && connectionStatus === "needs_reconnect" ? (
+      {user && needsReconnect ? (
         <section className={styles.reconnect} aria-label="Gmail account">
           <div className={styles.banner} role="alert">
             <p>
               <strong>Gmail needs reconnecting</strong>
-              Your Gmail permission needs renewing. Reconnect Gmail to resume
-              your scheduled emails.
+              {connections.length === 1
+                ? "Your Gmail permission needs renewing. Reconnect Gmail, then resume the schedules it paused."
+                : "Every Gmail account you connected needs its permission renewed. Reconnect one, then resume the schedules it paused."}
             </p>
-            <form
-              className={styles.form}
-              method="post"
-              action="/api/gmail/connect"
-            >
-              <button className={controls.primary} type="submit">
-                Reconnect Gmail
-              </button>
-            </form>
+            {connections.length === 1 ? (
+              <form
+                className={styles.form}
+                method="post"
+                action="/api/gmail/connect"
+              >
+                <input type="hidden" name="id" value={connections[0].id} />
+                <button className={controls.primary} type="submit">
+                  Reconnect Gmail
+                </button>
+              </form>
+            ) : null}
           </div>
-          <div className={styles.reconnectMeta}>
-            <p>
-              Connected account:{" "}
-              <span className={styles.email}>{connection.google_email}</span>
-            </p>
-            <ConfirmForm
-              trigger="Disconnect"
-              triggerStyle="dangerQuiet"
-              tone="danger"
-              {...disconnectDialog}
+          <div className={styles.reconnectAccounts}>
+            <GmailAccounts
+              accounts={connections}
+              schedules={loadError ? null : schedules}
             />
           </div>
         </section>
       ) : null}
 
-      {user && !connected && connectionStatus !== "needs_reconnect" ? (
+      {user && connections.length === 0 ? (
         <section
           className={`${controls.card} ${styles.step}`}
           aria-label="Gmail account"
@@ -244,9 +278,9 @@ export default async function Dashboard({
           <div>
             <h2>Connect Gmail to start sending</h2>
             <p>
-              Connect the same Google account you used to sign in. RecurMail
-              sends every schedule from that address, so recipients see your
-              normal Gmail sender.
+              Connect the Google account you want to send from. RecurMail sends
+              each schedule from the account you choose for it, so recipients
+              see your normal Gmail sender. You can add more accounts later.
             </p>
             <div className={styles.reassurance}>
               <svg viewBox="0 0 20 20" aria-hidden="true" fill="none">
@@ -280,41 +314,18 @@ export default async function Dashboard({
         </section>
       ) : null}
 
-      {user && connected && connection ? (
+      {user && connected ? (
         <div className={styles.grid}>
           <ScheduleList
             initialSchedules={schedules}
-            connectionStatus="connected"
+            accounts={accounts}
             loadError={loadError}
           />
           <aside className={styles.sidebar}>
-            <section
-              className={`${controls.card} ${styles.connection}`}
-              aria-label="Gmail connection"
-            >
-              <h2>Gmail is connected</h2>
-              <p className={styles.from}>
-                <span className={styles.dot} aria-hidden="true" />
-                <span>
-                  Sending from{" "}
-                  <span className={styles.email}>
-                    {connection.google_email}
-                  </span>
-                </span>
-              </p>
-              <p>
-                RecurMail can send your scheduled emails. It cannot read your
-                inbox, drafts or contacts.
-              </p>
-              <div className={styles.connectionFooter}>
-                <ConfirmForm
-                  trigger="Disconnect"
-                  triggerStyle="dangerQuiet"
-                  tone="danger"
-                  {...disconnectDialog}
-                />
-              </div>
-            </section>
+            <GmailAccounts
+              accounts={connections}
+              schedules={loadError ? null : schedules}
+            />
           </aside>
         </div>
       ) : null}
@@ -323,7 +334,7 @@ export default async function Dashboard({
         <div className={styles.listBelow}>
           <ScheduleList
             initialSchedules={schedules}
-            connectionStatus={connectionStatus}
+            accounts={accounts}
             loadError={loadError}
           />
         </div>

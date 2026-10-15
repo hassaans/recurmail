@@ -33,6 +33,12 @@ interface OpenApiDocument {
   openapi: string;
   info: { title: string; version: string };
   paths: Record<string, Record<string, unknown>>;
+  components: {
+    schemas: Record<
+      string,
+      { properties?: Record<string, unknown>; anyOf?: { required: string[] }[] }
+    >;
+  };
 }
 
 function document(): OpenApiDocument {
@@ -99,6 +105,18 @@ describe("US-005 root OpenAPI contract", () => {
     expect(operation, `${method.toUpperCase()} ${path}`).toBeDefined();
     expect(operation?.responses).toEqual(expect.any(Object));
     expect(Object.keys(operation?.responses ?? {}).length).toBeGreaterThan(0);
+  });
+
+  it("accepts a patch that changes only the sending account, like every other SchedulePatch field", () => {
+    const patch = document().components.schemas.SchedulePatch;
+    const fields = Object.keys(patch.properties ?? {});
+    expect(fields).toContain("gmail_connection_id");
+    // The anyOf lists the single-field patches the route accepts. A field in
+    // properties but missing here would be rejected on its own.
+    const alternatives = (patch.anyOf ?? []).map((branch) => branch.required);
+    expect(alternatives).toContainEqual(["gmail_connection_id"]);
+    for (const field of fields) expect(alternatives).toContainEqual([field]);
+    expect(alternatives.flat().sort()).toEqual([...fields].sort());
   });
 
   it("maps every documented HTTP operation to a route exporting its method", () => {

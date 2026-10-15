@@ -5,6 +5,7 @@ container=supabase_db_recurmail
 user_id=00000000-0000-4000-8000-000000000009
 first_id=10000000-0000-4000-8000-000000000009
 second_id=10000000-0000-4000-8000-000000000010
+connection_id=40000000-0000-4000-8000-000000000009
 first_notice=20000000-0000-4000-8000-000000000010
 second_notice=20000000-0000-4000-8000-000000000011
 work_dir=$(mktemp -d)
@@ -27,13 +28,13 @@ trap cleanup EXIT
 docker exec -i -u postgres "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<SQL
 insert into auth.users (id, email, aud, role)
 values ('$user_id', 'sender-concurrency@example.test', 'authenticated', 'authenticated');
-insert into public.gmail_connections (user_id, google_email, encrypted_refresh_token, status)
-values ('$user_id', 'sender-concurrency@example.test', 'ciphertext', 'connected');
+insert into public.gmail_connections (id, user_id, google_email, encrypted_refresh_token, status)
+values ('$connection_id', '$user_id', 'sender-concurrency@example.test', 'ciphertext', 'connected');
 insert into public.schedules (
-  id, user_id, subject, body_text, "to", rrule, timezone, next_send_at, status
+  id, user_id, gmail_connection_id, subject, body_text, "to", rrule, timezone, next_send_at, status
 ) values
-  ('$first_id', '$user_id', 'first', 'body', array['first@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '1 minute', 'active'),
-  ('$second_id', '$user_id', 'second', 'body', array['second@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '1 minute', 'active');
+  ('$first_id', '$user_id', '$connection_id', 'first', 'body', array['first@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '1 minute', 'active'),
+  ('$second_id', '$user_id', '$connection_id', 'second', 'body', array['second@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '1 minute', 'active');
 insert into public.reconnect_email_outbox (id, user_id, recipient, reconnect_url)
 values
   ('$first_notice', '$user_id', 'first@example.test', 'https://example.test/reconnect/1'),

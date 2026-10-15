@@ -57,6 +57,7 @@ Deno.test("Supabase service requests send the secret key only as apikey", async 
   await store.reconnect({
     scheduleId: "schedule-1",
     userId: "user-1",
+    connectionId: "connection-1",
     scheduledFor: "2026-10-14T00:00:00.000Z",
     recipient: "user@example.test",
     reconnectUrl: "https://app.example.test/connect",
@@ -147,6 +148,7 @@ const dueSchedule = (
 ): ClaimedSchedule => ({
   schedule_id: "schedule-1",
   user_id: userId,
+  gmail_connection_id: "connection-1",
   scheduled_for: "2026-10-14T17:00:00.000Z",
   subject: "hello",
   body_text: "a recurring note",
@@ -468,6 +470,7 @@ Deno.test("invalid_grant pauses through the reconnect outbox", async () => {
         {
           scheduleId: "schedule-1",
           userId: "user-interop-1",
+          connectionId: "connection-1",
           scheduledFor: "2026-10-14T17:00:00.000Z",
           recipient: "sender@example.test",
           reconnectUrl: "https://recurmail.example.test/dashboard?gmail=failed",
@@ -481,7 +484,7 @@ Deno.test("invalid_grant pauses through the reconnect outbox", async () => {
   }
 });
 
-Deno.test("invalid_grant avoids sending later claims for the same user", async () => {
+Deno.test("invalid_grant avoids sending later claims for the same account", async () => {
   const { envelope, key } = await nodeEncryptedToken();
   const second = { ...dueSchedule(envelope), schedule_id: "schedule-2" };
   const store = recordingStore([dueSchedule(envelope), second]);
@@ -496,12 +499,84 @@ Deno.test("invalid_grant avoids sending later claims for the same user", async (
       throw new GmailError("invalid_grant", "invalid_grant");
     },
   });
-  equal(sends, 1, "second claim for disconnected user is not sent");
+  equal(sends, 1, "second claim for the disconnected account is not sent");
   equal(result.failed, 2, "both claimed schedules are marked failed");
   equal(
     store.reconnects.length,
     2,
     "each claimed schedule gets a failed log through reconnect RPC",
+  );
+  equal(
+    store.reconnects.map(
+      (row) => (row as { connectionId: string }).connectionId,
+    ),
+    ["connection-1", "connection-1"],
+    "both reconnect rows name the rejected account",
+  );
+});
+
+Deno.test("invalid_grant on one account leaves the user's other account sending", async () => {
+  const { envelope, key } = await nodeEncryptedToken();
+  const work = {
+    ...dueSchedule(envelope),
+    schedule_id: "schedule-work",
+    gmail_connection_id: "connection-work",
+    google_email: "work@company.test",
+  };
+  const personalAgain = {
+    ...dueSchedule(envelope),
+    schedule_id: "schedule-personal-2",
+  };
+  const schedules = [dueSchedule(envelope), work, personalAgain];
+  const store = recordingStore(schedules);
+  const sentFrom: string[] = [];
+  const result = await runSender(store, {
+    key,
+    clientId: "fake",
+    clientSecret: "fake",
+    appUrl: "https://recurmail.example.test",
+    // The sender only sees the Gmail fields, so the account is told apart by
+    // its address: sender@example.test is connection-1.
+    send: async (schedule) => {
+      if (schedule.google_email === "sender@example.test") {
+        throw new GmailError("invalid_grant", "invalid_grant");
+      }
+      sentFrom.push(schedule.google_email);
+      return `message-${schedule.google_email}`;
+    },
+  });
+  equal(
+    result,
+    {
+      claimed: 3,
+      sent: 1,
+      failed: 2,
+      deferred: 0,
+      notices_sent: 0,
+      notices_failed: 0,
+    },
+    "the healthy account sends while the rejected one fails",
+  );
+  equal(
+    sentFrom,
+    ["work@company.test"],
+    "the send came from the other account",
+  );
+  equal(
+    store.completed.map((row) => (row as { scheduleId: string }).scheduleId),
+    ["schedule-work"],
+    "only the other account's schedule is completed as sent",
+  );
+  equal(
+    store.reconnects.map((row) => {
+      const value = row as { scheduleId: string; connectionId: string };
+      return [value.scheduleId, value.connectionId];
+    }),
+    [
+      ["schedule-1", "connection-1"],
+      ["schedule-personal-2", "connection-1"],
+    ],
+    "only the rejected account's schedules are marked for reconnect",
   );
 });
 

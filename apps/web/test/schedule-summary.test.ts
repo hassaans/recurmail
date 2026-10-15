@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { recipientSummary, summarizeSchedule } from "../lib/schedule-summary";
+import {
+  recipientSummary,
+  senderAccounts,
+  senderStatus,
+  summarizeSchedule,
+} from "../lib/schedule-summary";
 import type { ScheduleRow } from "../lib/schedules";
 
 const row: ScheduleRow = {
@@ -16,6 +21,7 @@ const row: ScheduleRow = {
   source: "web",
   status: "active",
   next_send_at: "2026-10-19T04:15:00.000Z",
+  gmail_connection_id: "11111111-1111-4111-8111-111111111111",
   created_at: "2026-10-01T00:00:00.000Z",
   updated_at: "2026-10-01T00:00:00.000Z",
 };
@@ -57,9 +63,70 @@ describe("summarizeSchedule", () => {
       status: "active",
       next_send_at: "2026-10-19T04:15:00.000Z",
       finished: null,
+      gmail_connection_id: "11111111-1111-4111-8111-111111111111",
+      sender: null,
     });
     expect(summarizeSchedule(row)).not.toHaveProperty("body_text");
     expect(summarizeSchedule(row)).not.toHaveProperty("user_id");
+  });
+
+  it("names the account the schedule sends from and reports its state", () => {
+    const accounts = senderAccounts([
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        google_email: "work@company.test",
+        status: "needs_reconnect",
+      },
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        google_email: "owner@gmail.com",
+        status: "connected",
+      },
+    ]);
+    expect(accounts).toEqual([
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        email: "work@company.test",
+        status: "needs_reconnect",
+      },
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        email: "owner@gmail.com",
+        status: "connected",
+      },
+    ]);
+    const summary = summarizeSchedule(row, null, accounts);
+    expect(summary.sender).toEqual({
+      email: "owner@gmail.com",
+      status: "connected",
+    });
+    expect(senderStatus(summary)).toBe("connected");
+    const reconnect = summarizeSchedule(
+      { ...row, gmail_connection_id: "22222222-2222-4222-8222-222222222222" },
+      null,
+      accounts,
+    );
+    expect(reconnect.sender).toEqual({
+      email: "work@company.test",
+      status: "needs_reconnect",
+    });
+    expect(senderStatus(reconnect)).toBe("needs_reconnect");
+  });
+
+  it("reports no sender once the account is gone", () => {
+    const accounts = senderAccounts([
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        google_email: "work@company.test",
+        status: "connected",
+      },
+    ]);
+    expect(summarizeSchedule(row, null, accounts).sender).toBeNull();
+    expect(
+      summarizeSchedule({ ...row, gmail_connection_id: null }, null, accounts)
+        .sender,
+    ).toBeNull();
+    expect(senderStatus({ sender: null })).toBe("none");
   });
 
   it("carries the finished info the server derived", () => {

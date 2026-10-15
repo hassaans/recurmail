@@ -17,6 +17,8 @@ const instant = Date.parse("2026-07-01T09:00:00Z");
 const nextSendAt = "2026-07-02T09:00:00.000Z";
 const owner = { id: "owner", email: "owner@gmail.com" };
 const accessToken = "fake-access";
+const connectionId = "11111111-1111-4111-8111-111111111111";
+const workId = "22222222-2222-4222-8222-222222222222";
 
 interface ScheduleInput {
   subject: string;
@@ -28,6 +30,7 @@ interface ScheduleInput {
   rrule: string;
   timezone: string;
   source: "web" | "api" | "cli" | "mcp";
+  gmail_connection_id: string | null;
 }
 
 interface ScheduleRow extends ScheduleInput {
@@ -50,6 +53,7 @@ function input(overrides: Partial<ScheduleInput> = {}): ScheduleInput {
     rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;BYSECOND=0",
     timezone: "UTC",
     source: "web",
+    gmail_connection_id: connectionId,
     ...overrides,
   };
 }
@@ -95,9 +99,11 @@ function request(
 function fixture(
   seed: ScheduleRow[] = [],
   connectionOverrides: Partial<PublicConnection> = {},
+  moreConnections: PublicConnection[] = [],
 ) {
   const rows = structuredClone(seed);
   const connection: PublicConnection = {
+    id: connectionId,
     user_id: owner.id,
     google_email: owner.email,
     is_workspace: false,
@@ -105,6 +111,7 @@ function fixture(
     connected_at: "2026-06-30T09:00:00.000Z",
     ...connectionOverrides,
   };
+  const connections = [connection, ...moreConnections];
   const find = (userId: string, id: string) =>
     rows.find((saved) => saved.user_id === userId && saved.id === id);
   const store = {
@@ -150,8 +157,8 @@ function fixture(
       }
       return count;
     }),
-    readConnection: vi.fn(async (userId: string, _token: string) =>
-      userId === connection.user_id ? structuredClone(connection) : null,
+    listConnections: vi.fn(async (userId: string, _token: string) =>
+      structuredClone(connections.filter((own) => own.user_id === userId)),
     ),
     history: vi.fn(async () => [] as SendHistoryRow[]),
   };
@@ -163,9 +170,17 @@ function fixture(
   return { handlers, store, authenticate, now, rows };
 }
 
-function forecast(rows: ScheduleRow[], workspace = false, now = instant) {
+function forecast(
+  rows: ScheduleRow[],
+  workspace = false,
+  now = instant,
+  sender: string | null = connectionId,
+) {
   const schedules: LimitSchedule[] = rows
-    .filter((saved) => saved.user_id === owner.id)
+    .filter(
+      (saved) =>
+        saved.user_id === owner.id && saved.gmail_connection_id === sender,
+    )
     .map((saved) => ({
       status: saved.status,
       rrule: saved.rrule,
@@ -381,7 +396,269 @@ describe("US-005 schedule HTTP handlers with injected persistence", () => {
     );
     expect(result.dailyLimitCheck).toEqual(forecast(f.rows));
     expect(result.warning).toBeFalsy();
-    expect(f.store.readConnection).toHaveBeenCalledWith(owner.id, accessToken);
+    expect(f.store.listConnections).toHaveBeenCalledWith(owner.id, accessToken);
+  });
+
+  it("sends from the first connected account when the input names none", async () => {
+    const f = fixture([], { status: "needs_reconnect" }, [
+      {
+        id: workId,
+        user_id: owner.id,
+        google_email: "work@company.test",
+        is_workspace: true,
+        status: "connected",
+        connected_at: "2026-07-01T00:00:00.000Z",
+      },
+    ]);
+    for (const body of [
+      input({ gmail_connection_id: null }),
+      (({ gmail_connection_id: _omitted, ...rest }) => rest)(input()),
+    ]) {
+      const response = await f.handlers.create(
+        request("/api/schedules", "POST", body),
+      );
+      expect(response.status).toBe(201);
+      expect((await response.json()).schedule.gmail_connection_id).toBe(workId);
+    }
+  });
+
+  it("refuses to create a schedule when no account can send", async () => {
+    const none = fixture();
+    vi.mocked(none.store.listConnections).mockResolvedValue([]);
+    const missing = await none.handlers.create(
+      request("/api/schedules", "POST", input({ gmail_connection_id: null })),
+    );
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toEqual({
+      error: {
+        code: "sender_required",
+        message: "Choose a Gmail account to send from",
+      },
+    });
+    const reconnect = fixture([], { status: "needs_reconnect" });
+    const stale = await reconnect.handlers.create(
+      request("/api/schedules", "POST", input()),
+    );
+    expect(stale.status).toBe(400);
+    expect(await stale.json()).toEqual({
+      error: {
+        code: "sender_required",
+        message: "Reconnect owner@gmail.com before sending from it",
+      },
+    });
+    expect(none.rows).toEqual([]);
+    expect(reconnect.rows).toEqual([]);
+    expect(none.store.create).not.toHaveBeenCalled();
+    expect(reconnect.store.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["another user's account", "33333333-3333-4333-8333-333333333333"],
+    ["an account that no longer exists", workId],
+  ])("rejects %s as the sender", async (_label, id) => {
+    const f = fixture([row()], {}, [
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        user_id: "other",
+        google_email: "other@gmail.com",
+        is_workspace: false,
+        status: "connected",
+        connected_at: "2026-07-01T00:00:00.000Z",
+      },
+    ]);
+    for (const [handler, path, method] of [
+      ["create", "/api/schedules", "POST"],
+      ["patch", "/api/schedules/schedule-1", "PATCH"],
+    ] as const) {
+      const response = await f.handlers[handler](
+        request(path, method, { ...input(), gmail_connection_id: id }),
+        "schedule-1",
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "sender_required",
+          message: "Choose one of your connected Gmail accounts",
+        },
+      });
+    }
+    expect(f.rows[0].gmail_connection_id).toBe(connectionId);
+    expect(f.store.create).not.toHaveBeenCalled();
+    expect(f.store.update).not.toHaveBeenCalled();
+  });
+
+  it.each(["not-a-uuid", 42, "", {}])(
+    "treats %j as an invalid sender id",
+    async (id) => {
+      const f = fixture();
+      const response = await f.handlers.create(
+        request("/api/schedules", "POST", {
+          ...input(),
+          gmail_connection_id: id,
+        }),
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "invalid_input",
+          message: "gmail_connection_id must be a Gmail connection ID or null",
+        },
+      });
+    },
+  );
+
+  it("lets a paused schedule change to any owned account but an active one only to a connected account", async () => {
+    const stale = {
+      id: workId,
+      user_id: owner.id,
+      google_email: "work@company.test",
+      is_workspace: true,
+      status: "needs_reconnect" as const,
+      connected_at: "2026-07-01T00:00:00.000Z",
+    };
+    const f = fixture([row(), row({ id: "paused", status: "paused" })], {}, [
+      stale,
+    ]);
+    const active = await f.handlers.patch(
+      request("/api/schedules/schedule-1", "PATCH", {
+        gmail_connection_id: workId,
+      }),
+      "schedule-1",
+    );
+    expect(active.status).toBe(400);
+    expect(await active.json()).toEqual({
+      error: {
+        code: "sender_required",
+        message: "Reconnect work@company.test before sending from it",
+      },
+    });
+    expect(f.rows[0].gmail_connection_id).toBe(connectionId);
+    const paused = await f.handlers.patch(
+      request("/api/schedules/paused", "PATCH", {
+        gmail_connection_id: workId,
+      }),
+      "paused",
+    );
+    expect(paused.status).toBe(200);
+    expect((await paused.json()).schedule).toMatchObject({
+      status: "paused",
+      gmail_connection_id: workId,
+    });
+    // Resuming it needs that account to be able to send.
+    const resumed = await f.handlers.resume(
+      request("/api/schedules/paused/resume", "POST"),
+      "paused",
+    );
+    expect(resumed.status).toBe(400);
+    expect(await resumed.json()).toEqual({
+      error: {
+        code: "sender_required",
+        message: "Reconnect work@company.test before sending from it",
+      },
+    });
+    expect(f.rows[1].status).toBe("paused");
+  });
+
+  it("will not resume a schedule without a sender until one is chosen", async () => {
+    const f = fixture([
+      row({ id: "orphan", status: "paused", gmail_connection_id: null }),
+    ]);
+    const blocked = await f.handlers.resume(
+      request("/api/schedules/orphan/resume", "POST"),
+      "orphan",
+    );
+    expect(blocked.status).toBe(400);
+    expect(await blocked.json()).toEqual({
+      error: {
+        code: "sender_required",
+        message: "Choose a Gmail account to send from",
+      },
+    });
+    expect(f.rows[0].status).toBe("paused");
+    const chosen = await f.handlers.patch(
+      request("/api/schedules/orphan", "PATCH", {
+        gmail_connection_id: connectionId,
+      }),
+      "orphan",
+    );
+    expect(chosen.status).toBe(200);
+    expect(f.rows[0]).toMatchObject({
+      status: "paused",
+      gmail_connection_id: connectionId,
+    });
+    const resumed = await f.handlers.resume(
+      request("/api/schedules/orphan/resume", "POST"),
+      "orphan",
+    );
+    expect(resumed.status).toBe(200);
+    expect(f.rows[0].status).toBe("active");
+  });
+
+  it("forecasts the daily limit per sending account and names the account in the warning", async () => {
+    const f = fixture(
+      [
+        row({
+          id: "personal-existing",
+          to: Array.from({ length: 300 }, (_, i) => `a${i}@example.test`),
+        }),
+        row({
+          id: "work-existing",
+          gmail_connection_id: workId,
+          to: Array.from({ length: 300 }, (_, i) => `b${i}@example.test`),
+        }),
+      ],
+      {},
+      [
+        {
+          id: workId,
+          user_id: owner.id,
+          google_email: "second@gmail.com",
+          is_workspace: false,
+          status: "connected",
+          connected_at: "2026-07-01T00:00:00.000Z",
+        },
+      ],
+    );
+    const response = await f.handlers.create(
+      request(
+        "/api/schedules",
+        "POST",
+        input({
+          to: Array.from({ length: 150 }, (_, i) => `c${i}@example.test`),
+        }),
+      ),
+    );
+    expect(response.status).toBe(201);
+    const result = await response.json();
+    expect(result.dailyLimitCheck).toEqual(forecast(f.rows));
+    expect(result.dailyLimitCheck).toMatchObject({
+      count: 450,
+      limit: 500,
+      status: "warn",
+    });
+    expect(result.warning).toBe(
+      "Personal Gmail daily recipient limit forecast for owner@gmail.com is warn (450/500).",
+    );
+    const other = await f.handlers.create(
+      request(
+        "/api/schedules",
+        "POST",
+        input({
+          gmail_connection_id: workId,
+          to: Array.from({ length: 50 }, (_, i) => `d${i}@example.test`),
+        }),
+      ),
+    );
+    expect(other.status).toBe(201);
+    const otherResult = await other.json();
+    expect(otherResult.dailyLimitCheck).toEqual(
+      forecast(f.rows, false, instant, workId),
+    );
+    expect(otherResult.dailyLimitCheck).toMatchObject({
+      count: 350,
+      status: "ok",
+    });
+    expect(otherResult.warning).toBeFalsy();
   });
 
   it("sanitizes body_html on create and patch before persistence", async () => {
@@ -470,7 +747,7 @@ describe("US-005 schedule HTTP handlers with injected persistence", () => {
       const result = await response.json();
       expect(result.dailyLimitCheck).toEqual(forecast(f.rows, is_workspace));
       expect(result.dailyLimitCheck).toMatchObject({ count, limit, status });
-      if (personalWarning) expect(result.warning).toMatch(/gmail/i);
+      if (personalWarning) expect(result.warning).toContain(google_email);
       else
         expect(result.warning ?? "").not.toMatch(
           /personal.*gmail|gmail.*personal/i,
