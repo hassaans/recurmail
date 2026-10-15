@@ -19,7 +19,8 @@ type DashboardState =
   | {
       kind: "signed_in";
       user: SignedInUser;
-      connection: PublicConnection | null;
+      /** Every Gmail account the user has connected, oldest first. */
+      connections: PublicConnection[];
     };
 interface RuntimeConfig {
   origin: string;
@@ -119,11 +120,11 @@ export function createRuntime(config: RuntimeConfig) {
         if (session.expiresAt <= Date.now()) return { kind: "refresh" };
         const identity = await authenticate(request);
         if (!identity) return { kind: "signed_out" };
-        const connection = await store.readPublic(
+        const connections = await store.list(
           identity.user.id,
           identity.accessToken,
         );
-        return { kind: "signed_in", user: identity.user, connection };
+        return { kind: "signed_in", user: identity.user, connections };
       } catch {
         console.error("[ERROR] runtime_dashboard_failed");
         return { kind: "unavailable" };

@@ -152,7 +152,7 @@ test.beforeEach(async ({ page, context, request, scenario }) => {
     page.getByText(`Signed in as ${scenario.connected.email}`),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Gmail is connected", exact: true }),
+    page.getByRole("heading", { name: "Gmail accounts", exact: true }),
   ).toBeVisible();
   const listed = await browserRequest<{ schedules: ScheduleRow[] }>(
     page,
@@ -713,6 +713,7 @@ test("needs_reconnect shows a clear reconnect banner and action", async ({
 
 test("editor displays the daily-limit warning exactly as returned by the API", async ({
   page,
+  scenario,
 }) => {
   await page.goto("/schedules/new");
   const recipients = Array.from(
@@ -729,7 +730,7 @@ test("editor displays the daily-limit warning exactly as returned by the API", a
   await expect(page).toHaveURL(/\/dashboard\?saved=1/);
   await expect(
     page.getByText(
-      "Personal Gmail daily recipient limit forecast is warn (400/500).",
+      `Personal Gmail daily recipient limit forecast for ${scenario.connected.email} is warn (400/500).`,
       { exact: true },
     ),
   ).toBeVisible();
@@ -1110,7 +1111,7 @@ test.describe("time zone picker", () => {
       "Common",
       "All",
     ]);
-    const options = page.getByRole("option");
+    const options = page.getByRole("listbox").getByRole("option");
     const first = options.first();
     await expect(first).toContainText("Asia/Karachi");
     await expect(first).toHaveAttribute("aria-selected", "true");
@@ -1143,7 +1144,7 @@ test.describe("time zone picker", () => {
   }) => {
     await page.goto("/schedules/new");
     const picker = page.getByRole("combobox", { name: "Time zone" });
-    const firstOption = page.getByRole("option").first();
+    const firstOption = page.getByRole("listbox").getByRole("option").first();
     const cases: [string, RegExp][] = [
       ["PKT", /Asia\/Karachi/],
       ["Lahore", /Asia\/Karachi/],
@@ -1180,7 +1181,7 @@ test.describe("time zone picker", () => {
     await firstOption.click();
     await expect(picker).toHaveValue("Pakistan Time (Asia/Karachi), UTC+5");
     await picker.fill("no such place");
-    await expect(page.getByRole("option")).toHaveCount(0);
+    await expect(page.getByRole("listbox").getByRole("option")).toHaveCount(0);
     await expect(
       page.getByText("No time zone matches “no such place”"),
     ).toBeVisible();
@@ -1306,7 +1307,7 @@ test("400 distinct daily recipients produce a personal Gmail limit warning", asy
     limit: 500,
   });
   expect(created.body.warning).toBe(
-    "Personal Gmail daily recipient limit forecast is warn (400/500).",
+    `Personal Gmail daily recipient limit forecast for ${scenario.connected.email} is warn (400/500).`,
   );
 });
 

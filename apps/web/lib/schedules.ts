@@ -4,7 +4,7 @@ import {
   dailyLimitCheck,
   nextOccurrence,
 } from "@recurmail/core";
-import type { PublicConnection } from "./connections";
+import { isConnectionId, type PublicConnection } from "./connections";
 import type { Authenticate, Identity } from "./gmail-flow";
 import { sameOrigin } from "./http";
 import { sanitizeScheduleHtml } from "./sanitize";
@@ -12,6 +12,8 @@ import { isFinishedSchedule } from "./schedule-finished";
 import { ScheduleStorageError } from "./schedule-store";
 
 export interface ScheduleInput {
+  /** The Gmail account that sends this schedule. Null once that account is removed. */
+  gmail_connection_id: string | null;
   subject: string;
   body_text: string;
   body_html: string | null;
@@ -62,10 +64,11 @@ export interface ScheduleStore {
   ): Promise<ScheduleRow | null>;
   delete(userId: string, id: string, accessToken: string): Promise<boolean>;
   pauseAll(userId: string, accessToken: string): Promise<number>;
-  readConnection(
+  /** Every Gmail account the user has connected, oldest first. */
+  listConnections(
     userId: string,
     accessToken: string,
-  ): Promise<PublicConnection | null>;
+  ): Promise<PublicConnection[]>;
   history(
     userId: string,
     scheduleId: string,
@@ -74,6 +77,7 @@ export interface ScheduleStore {
 }
 
 const editableFields = [
+  "gmail_connection_id",
   "subject",
   "body_text",
   "body_html",
@@ -97,6 +101,10 @@ export class RequestError extends Error {
 
 function invalid(message: string): never {
   throw new RequestError(400, "invalid_input", message);
+}
+
+function senderRequired(message: string): never {
+  throw new RequestError(400, "sender_required", message);
 }
 
 export function objectInput(value: unknown): Record<string, unknown> {
@@ -186,6 +194,14 @@ export function normalizeMessageContent(
 
 function normalize(value: unknown, at: Date): ScheduleInput {
   const input = objectInput(value);
+  const gmail_connection_id =
+    !Object.hasOwn(input, "gmail_connection_id") ||
+    input.gmail_connection_id === null
+      ? null
+      : typeof input.gmail_connection_id === "string" &&
+          isConnectionId(input.gmail_connection_id)
+        ? input.gmail_connection_id
+        : invalid("gmail_connection_id must be a Gmail connection ID or null");
   const {
     subject,
     body_text,
@@ -214,6 +230,7 @@ function normalize(value: unknown, at: Date): ScheduleInput {
     invalid("source must be web, api, cli or mcp");
   // Only this projection can reach persistence; owner and lifecycle fields are server-owned.
   return {
+    gmail_connection_id,
     subject,
     body_text,
     body_html: safeBodyHtml,
@@ -238,6 +255,30 @@ function nextSend(
   if (!next || next <= at)
     invalid("RRULE must have an occurrence strictly after now");
   return next.toISOString();
+}
+
+/**
+ * The account a schedule sends from. Any schedule may name one of the user's
+ * own accounts, but a schedule that is about to send needs one that is
+ * connected right now.
+ */
+export function senderFor(
+  connectionId: string | null,
+  connections: PublicConnection[],
+  activating: boolean,
+): PublicConnection | null {
+  if (connectionId === null) {
+    if (activating) senderRequired("Choose a Gmail account to send from");
+    return null;
+  }
+  const connection = connections.find((own) => own.id === connectionId);
+  if (!connection)
+    senderRequired("Choose one of your connected Gmail accounts");
+  if (activating && connection.status !== "connected")
+    senderRequired(
+      `Reconnect ${connection.google_email} before sending from it`,
+    );
+  return connection;
 }
 
 export function scheduleJson(body: unknown, status = 200): Response {
@@ -333,25 +374,38 @@ export function createScheduleHandlers(config: {
     return saved;
   }
 
+  async function connections(identity: Identity): Promise<PublicConnection[]> {
+    const rows = await store.listConnections(
+      identity.user.id,
+      identity.accessToken,
+    );
+    return rows.filter((row) => row.user_id === identity.user.id);
+  }
+
+  // Gmail's daily recipient limit applies per sending account, so the forecast
+  // counts only the schedules that share this schedule's sender.
   async function forecast(
     identity: Identity,
     schedule: ScheduleRow,
+    accounts: PublicConnection[],
     at: Date,
     status = 200,
   ) {
-    const [rows, connection] = await Promise.all([
-      store.list(identity.user.id, identity.accessToken),
-      store.readConnection(identity.user.id, identity.accessToken),
-    ]);
+    const rows = await store.list(identity.user.id, identity.accessToken);
+    const sender =
+      accounts.find((own) => own.id === schedule.gmail_connection_id) ?? null;
     // Replace by ID as well as adding a new row, so a changed schedule is counted once.
     const schedules = rows.filter(
-      (row) => row.user_id === identity.user.id && row.id !== schedule.id,
+      (row) =>
+        row.user_id === identity.user.id &&
+        row.id !== schedule.id &&
+        row.gmail_connection_id === schedule.gmail_connection_id,
     );
     schedules.push(schedule);
-    const personal = connection?.is_workspace === false;
-    const domain = connection?.google_email.split("@").pop()?.toLowerCase();
+    const personal = sender?.is_workspace === false;
+    const domain = sender?.google_email.split("@").pop()?.toLowerCase();
     const account: AccountType =
-      connection?.is_workspace === true
+      sender?.is_workspace === true
         ? "workspace"
         : domain === "googlemail.com"
           ? "googlemail.com"
@@ -373,9 +427,9 @@ export function createScheduleHandlers(config: {
       {
         schedule,
         dailyLimitCheck: check,
-        ...(personal && check.status !== "ok"
+        ...(personal && sender && check.status !== "ok"
           ? {
-              warning: `Personal Gmail daily recipient limit forecast is ${check.status} (${check.count}/${check.limit}).`,
+              warning: `Personal Gmail daily recipient limit forecast for ${sender.google_email} is ${check.status} (${check.count}/${check.limit}).`,
             }
           : {}),
       },
@@ -413,9 +467,20 @@ export function createScheduleHandlers(config: {
       run("create", request, true, async (identity) => {
         const at = new Date(now());
         const input = normalize(await payload(request), at);
+        const accounts = await connections(identity);
+        // A new schedule starts sending at once, so it needs a sender. Without
+        // one named, it sends from the first account that is connected.
+        const sender = senderFor(
+          input.gmail_connection_id ??
+            accounts.find((own) => own.status === "connected")?.id ??
+            null,
+          accounts,
+          true,
+        );
         const schedule = await store.create(
           {
             ...input,
+            gmail_connection_id: sender?.id ?? null,
             user_id: identity.user.id,
             status: "active",
             next_send_at: nextSend(input, at),
@@ -424,7 +489,7 @@ export function createScheduleHandlers(config: {
           },
           identity.accessToken,
         );
-        return forecast(identity, schedule, at, 201);
+        return forecast(identity, schedule, accounts, at, 201);
       }),
     patch: (request: Request, id: string) =>
       run("patch", request, true, async (identity) => {
@@ -446,6 +511,17 @@ export function createScheduleHandlers(config: {
         // out, so a new rule with a future send starts it again. A schedule
         // the user paused stays paused.
         const restart = ruleChanged && isFinishedSchedule(original, at);
+        const accounts = await connections(identity);
+        // A schedule that is sending, or is about to start again, must keep
+        // a connected sender. A paused one may name any of the user's accounts.
+        const senderChanged =
+          fields.includes("gmail_connection_id") &&
+          normalized.gmail_connection_id !== original.gmail_connection_id;
+        senderFor(
+          normalized.gmail_connection_id,
+          accounts,
+          restart || (senderChanged && original.status !== "paused"),
+        );
         const changes: ScheduleChanges = {
           ...Object.fromEntries(
             fields.map((field) => [field, normalized[field]]),
@@ -454,7 +530,12 @@ export function createScheduleHandlers(config: {
           ...(ruleChanged ? { next_send_at: nextSend(normalized, at) } : {}),
           ...(restart ? { status: "active" as const } : {}),
         };
-        return forecast(identity, await update(identity, id, changes), at);
+        return forecast(
+          identity,
+          await update(identity, id, changes),
+          accounts,
+          at,
+        );
       }),
     delete: (request: Request, id: string) =>
       run("delete", request, true, async (identity) => {
@@ -478,13 +559,15 @@ export function createScheduleHandlers(config: {
     resume: (request: Request, id: string) =>
       run("resume", request, true, async (identity) => {
         const original = await owned(identity, id);
+        const accounts = await connections(identity);
+        senderFor(original.gmail_connection_id, accounts, true);
         const at = new Date(now());
         const schedule = await update(identity, id, {
           status: "active",
           next_send_at: nextSend(original, at),
           updated_at: at.toISOString(),
         });
-        return forecast(identity, schedule, at);
+        return forecast(identity, schedule, accounts, at);
       }),
     pauseAll: (request: Request) =>
       run("pauseAll", request, true, async (identity) =>

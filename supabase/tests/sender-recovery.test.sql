@@ -5,14 +5,14 @@ select plan(17);
 
 insert into auth.users (id, email, aud, role) values
   ('00000000-0000-4000-8000-000000000009', 'recovery@example.test', 'authenticated', 'authenticated');
-insert into public.gmail_connections (user_id, google_email, encrypted_refresh_token, status)
-values ('00000000-0000-4000-8000-000000000009', 'recovery@example.test', 'ciphertext', 'connected');
+insert into public.gmail_connections (id, user_id, google_email, encrypted_refresh_token, status)
+values ('40000000-0000-4000-8000-000000000009', '00000000-0000-4000-8000-000000000009', 'recovery@example.test', 'ciphertext', 'connected');
 insert into public.schedules (
-  id, user_id, subject, body_text, "to", rrule, timezone, next_send_at, status, updated_at
+  id, user_id, gmail_connection_id, subject, body_text, "to", rrule, timezone, next_send_at, status, updated_at
 ) values
-  ('10000000-0000-4000-8000-000000000009', '00000000-0000-4000-8000-000000000009', 'stale', 'body', array['stale@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '20 minutes', 'sending', now() - interval '20 minutes'),
-  ('10000000-0000-4000-8000-000000000010', '00000000-0000-4000-8000-000000000009', 'fresh', 'body', array['fresh@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '2 minutes', 'sending', now() - interval '2 minutes'),
-  ('10000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000009', 'active', 'body', array['active@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '20 minutes', 'active', now() - interval '20 minutes');
+  ('10000000-0000-4000-8000-000000000009', '00000000-0000-4000-8000-000000000009', '40000000-0000-4000-8000-000000000009', 'stale', 'body', array['stale@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '20 minutes', 'sending', now() - interval '20 minutes'),
+  ('10000000-0000-4000-8000-000000000010', '00000000-0000-4000-8000-000000000009', '40000000-0000-4000-8000-000000000009', 'fresh', 'body', array['fresh@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '2 minutes', 'sending', now() - interval '2 minutes'),
+  ('10000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000009', '40000000-0000-4000-8000-000000000009', 'active', 'body', array['active@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '20 minutes', 'active', now() - interval '20 minutes');
 
 select public.record_sender_failure('10000000-0000-4000-8000-000000000009', now() - interval '20 minutes', 'post_send_store_failed');
 select is((select count(*) from public.send_log where schedule_id = '10000000-0000-4000-8000-000000000009' and error_code = 'post_send_store_failed'), 1::bigint, 'post-send store failure is recorded');

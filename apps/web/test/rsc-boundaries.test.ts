@@ -82,19 +82,27 @@ const listProps: ComponentProps<typeof ScheduleList> = {
       status: "active",
       next_send_at: "2026-10-19T04:15:00.000Z",
       finished: null,
+      gmail_connection_id: "11111111-1111-4111-8111-111111111111",
+      sender: { email: "owner@gmail.com", status: "connected" },
     },
   ],
-  connectionStatus: "connected",
+  accounts: [
+    {
+      id: "11111111-1111-4111-8111-111111111111",
+      email: "owner@gmail.com",
+      status: "connected",
+    },
+  ],
   loadError: false,
 };
 const confirmFormProps: ComponentProps<typeof ConfirmForm> = {
   trigger: "Disconnect",
   triggerStyle: "dangerQuiet",
-  title: "Disconnect Gmail?",
-  description: "Every schedule will pause.",
-  confirmLabel: "Disconnect Gmail",
+  title: "Disconnect owner@gmail.com?",
+  description: "Its 1 schedule will pause.",
+  confirmLabel: "Disconnect",
   pendingLabel: "Disconnecting…",
-  action: "/api/gmail/disconnect",
+  action: "/api/gmail/disconnect?id=11111111-1111-4111-8111-111111111111",
   tone: "danger",
 };
 const pauseButtonProps: ComponentProps<typeof SchedulePauseButton> = {
@@ -231,7 +239,7 @@ describe("server/client prop boundaries", () => {
     const editorProps: ComponentProps<typeof ScheduleEditor> = {
       scheduleId: "c4a7b913-3d35-4c0d-8e7c-4c5d101f3f88",
       userEmail: "owner@example.test",
-      senderEmail: "owner@gmail.com",
+      accounts: listProps.accounts,
     };
 
     expect(JSON.parse(JSON.stringify(editorProps))).toEqual(editorProps);
@@ -251,10 +259,25 @@ describe("server/client prop boundaries", () => {
         createElement(ScheduleEditor, {
           scheduleId: "schedule-123",
           userEmail: "owner@example.test",
-          senderEmail: "owner@gmail.com",
+          accounts: listProps.accounts,
         }),
       ),
     ).toContain("Edit schedule");
+    const editor = renderToString(
+      createElement(ScheduleEditor, {
+        accounts: [
+          ...listProps.accounts,
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            email: "work@company.test",
+            status: "needs_reconnect",
+          },
+        ],
+      }),
+    );
+    expect(editor).toContain("New schedule");
+    expect(editor).toContain(">owner@gmail.com<");
+    expect(editor).toContain("work@company.test (needs reconnect)");
     const list = renderToString(createElement(ScheduleList, listProps));
     expect(list).toContain("Weekly check-in");
     expect(list).toContain("Every week on Monday at 9:15 AM");
@@ -292,11 +315,43 @@ describe("server/client prop boundaries", () => {
     const waitingList = renderToString(
       createElement(ScheduleList, {
         ...listProps,
-        connectionStatus: "disconnected",
+        initialSchedules: [
+          {
+            ...listProps.initialSchedules[0],
+            sender: { email: "owner@gmail.com", status: "disconnected" },
+          },
+        ],
       }),
     );
     expect(waitingList).toContain("Waiting for Gmail");
     expect(waitingList).not.toContain("Next send");
+    const twoAccounts = renderToString(
+      createElement(ScheduleList, {
+        ...listProps,
+        initialSchedules: [
+          listProps.initialSchedules[0],
+          {
+            ...listProps.initialSchedules[0],
+            id: "d5b8c024-4e46-4d1e-9f8d-5d6e212a4a99",
+            status: "paused",
+            gmail_connection_id: null,
+            sender: null,
+          },
+        ],
+        accounts: [
+          ...listProps.accounts,
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            email: "work@company.test",
+            status: "connected",
+          },
+        ],
+      }),
+    );
+    expect(twoAccounts).toContain("From owner@gmail.com");
+    expect(twoAccounts).toContain("No sender. Choose a Gmail account.");
+    expect(twoAccounts).toContain("Choose sender");
+    expect(twoAccounts).not.toContain(">Resume<");
     expect(
       renderToString(
         createElement(ScheduleList, {
@@ -309,8 +364,11 @@ describe("server/client prop boundaries", () => {
     const confirmForm = renderToString(
       createElement(ConfirmForm, confirmFormProps),
     );
-    expect(confirmForm).toContain("Disconnect Gmail?");
-    expect(confirmForm).toContain('action="/api/gmail/disconnect"');
+    expect(confirmForm).toContain("Disconnect owner@gmail.com?");
+    expect(confirmForm).toContain("Its 1 schedule will pause.");
+    expect(confirmForm).toContain(
+      'action="/api/gmail/disconnect?id=11111111-1111-4111-8111-111111111111"',
+    );
     const pauseButton = renderToString(
       createElement(SchedulePauseButton, pauseButtonProps),
     );
