@@ -1,75 +1,18 @@
-.page {
-  --rm-bg: #f3faf6;
-  --rm-bg-2: #e4f3eb;
-  --rm-paper: #fff;
-  --rm-line: #d5e8dd;
+/* The editor renders inside AppShell, which owns the page background, header
+   and footer. Brand tokens come from globals.css; the few the editor needs on
+   top of them live here. */
+.main {
   --rm-line-strong: #b9cdbf;
-  --rm-ink: #1b1530;
-  --rm-ink-2: #3f3856;
-  --rm-muted: #6e6886;
-  --rm-grape: #6d3bef;
-  --rm-grape-dark: #5326d1;
-  --rm-grape-soft: #ece4ff;
-  --rm-teal: #0e9f87;
-  --rm-teal-soft: #d3f2ea;
   --rm-teal-ink: #0a5f52;
-  --rm-sun: #ffd84d;
-  --rm-sun-soft: #fff3bf;
-  --rm-sky-soft: #e3ebff;
-  --rm-warn-bg: #fff4e5;
-  --rm-warn-line: #f6d7a8;
-  --rm-warn-ink: #6b4a12;
-  --rm-danger: #e5484d;
   --rm-danger-bg: #fdecec;
   --rm-danger-line: #f3b4b7;
-  --rm-danger-ink: #8a1c21;
-  --rm-radius: 18px;
-  --rm-radius-sm: 12px;
-  --rm-radius-pill: 999px;
-  --rm-shadow:
-    0 1px 0 rgb(27 21 48 / 4%), 0 10px 30px -12px rgb(27 21 48 / 18%);
   --rm-ring: 0 0 0 3px rgb(109 59 239 / 22%);
-  min-height: 100vh;
-  background: #f3faf6;
-  color: #1b1530;
+  color: var(--rm-ink);
   font: 17px / 1.6 var(--rm-font-body);
 }
-.page * {
-  box-sizing: border-box;
-}
-.header,
 .main,
-.footer {
-  width: min(100% - 40px, 820px);
-  margin-inline: auto;
-}
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-block: 24px;
-}
-.header a {
-  color: #5326d1;
-}
-.header .logo {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  flex: none;
-  color: #1b1530;
-  font: 700 26px / 1 var(--rm-font-display);
-  letter-spacing: -0.03em;
-  text-decoration: none;
-}
-.logo svg {
-  width: 34px;
-  height: 34px;
-  flex: none;
-}
-
-.main {
-  padding-block: 32px 64px;
+.main * {
+  box-sizing: border-box;
 }
 .main h1,
 .main h2,
@@ -682,30 +625,13 @@
   background: var(--rm-bg-2);
 }
 
-.footer {
-  border-top: 1px solid #d5e8dd;
-  padding: 20px 0 32px;
-  color: #6e6886;
-  font-size: 13px;
-}
-.page a:focus-visible,
-.page button:focus-visible {
+.main a:focus-visible,
+.main button:focus-visible {
   outline: 3px solid #6d3bef;
   outline-offset: 3px;
 }
 .tool:focus-visible {
   outline-offset: 0;
-}
-.skip {
-  position: absolute;
-  left: -9999px;
-  top: 12px;
-  padding: 10px;
-  background: #fff;
-  color: #1b1530;
-}
-.skip:focus {
-  left: 16px;
 }
 .srOnly {
   position: absolute;

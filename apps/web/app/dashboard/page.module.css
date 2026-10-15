@@ -1,152 +1,229 @@
-.page {
-  min-height: 100vh;
-  background: #f3faf6;
-  color: #1b1530;
-  font: 17px / 1.6 var(--rm-font-body);
-}
-.page * {
-  box-sizing: border-box;
-}
-.header,
-.main,
-.footer {
-  width: min(100% - 40px, 760px);
-  margin-inline: auto;
-}
-.header {
+.pageHeader {
   display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   justify-content: space-between;
-  align-items: center;
-  padding-block: 24px;
+  gap: 12px 24px;
+  margin: 0 0 24px;
 }
-.logo {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  flex: none;
-  font: 700 26px / 1 var(--rm-font-display);
-  letter-spacing: -0.03em;
-  text-decoration: none;
-  color: #1b1530;
-}
-.logo svg {
-  width: 34px;
-  height: 34px;
-  flex: none;
-}
-
-.main {
-  padding-block: 32px 64px;
-}
-.main h1,
-.main h2 {
-  font-family: var(--rm-font-display);
-  line-height: 1.15;
-  letter-spacing: -0.03em;
-}
-.main h1 {
-  font-size: clamp(32px, 6vw, 48px);
-  margin: 8px 0 28px;
-}
-.main h2 {
-  font-size: 26px;
-  margin: 0 0 16px;
-}
-.main p {
-  margin: 0 0 18px;
-  color: #3f3856;
-}
-.main .eyebrow {
-  color: #5326d1;
-  font-size: 14px;
-  font-weight: 600;
+.pageHeader h1 {
   margin: 0;
+  font: 800 clamp(30px, 4.5vw, 40px) / 1.1 var(--rm-font-display);
+  letter-spacing: -0.03em;
 }
-.card {
-  background: #fff;
-  border: 1px solid #d5e8dd;
-  border-radius: 18px;
-  padding: clamp(20px, 4vw, 32px);
-  overflow-wrap: anywhere;
+.lede {
+  margin: 8px 0 0;
+  max-width: 560px;
+  color: var(--rm-ink-2);
 }
-.email {
+.headerActions {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+.status {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 20px;
+  padding: 14px 18px;
+  border: 1px solid var(--rm-line);
+  border-radius: var(--rm-radius-sm);
+  background: var(--rm-paper);
+  color: var(--rm-ink-2);
   font-size: 15px;
 }
-.notice {
-  background: #fff3bf;
-  border-radius: 12px;
-  padding: 18px;
-}
-.reconnect {
-  margin-block: 16px;
-  padding: 16px;
-  border: 1px solid #f6d7a8;
-  border-radius: 12px;
-  background: #fff4e5;
-  color: #6b4a12;
-}
-.button {
-  display: inline-block;
-  border: 0;
-  border-radius: 999px;
-  background: #6d3bef;
-  color: #fff;
-  padding: 16px 24px;
-  font: 600 16px / 1.3 var(--rm-font-body);
-  text-decoration: none;
-  cursor: pointer;
-  max-width: 100%;
-}
-.button:hover {
-  background: #5326d1;
-}
-.secondary {
-  margin-top: 16px;
-  border: 0;
-  background: transparent;
-  color: #5326d1;
-  font: inherit;
-  text-decoration: underline;
-  cursor: pointer;
-}
-.page a:focus-visible,
-.page button:focus-visible {
-  outline: 3px solid #6d3bef;
-  outline-offset: 4px;
-}
-.footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 20px 0 32px;
-  border-top: 1px solid #d5e8dd;
-  font-size: 13px;
-  color: #6e6886;
-}
-.footer nav {
-  display: flex;
-  gap: 12px;
-}
-.footer nav a {
-  color: #3f3856;
-  text-decoration: none;
-}
-.footer nav a:hover {
-  color: #5326d1;
-}
-.footer p {
+.status p {
   margin: 0;
 }
-.skip {
-  position: absolute;
-  left: -9999px;
-  top: 12px;
-  padding: 10px;
-  background: #fff;
-  color: #1b1530;
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 296px;
+  gap: 28px;
+  align-items: start;
 }
-.skip:focus {
-  left: 16px;
+.sidebar {
+  position: sticky;
+  top: 24px;
+  display: grid;
+  gap: 16px;
+}
+
+/* Gmail connection card */
+.connection h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.from {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+.dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--rm-teal);
+  transform: translateY(-1px);
+}
+.email {
+  color: var(--rm-ink);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.connectionFooter {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--rm-line);
+}
+
+/* Reconnect banner */
+.reconnect {
+  margin: 0 0 24px;
+}
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding: 18px 22px;
+  border: 1px solid var(--rm-warn-line);
+  border-radius: var(--rm-radius);
+  background: var(--rm-warn-bg);
+  color: var(--rm-warn-ink);
+}
+.banner p {
+  flex: 1 1 320px;
+  margin: 0;
+}
+.banner strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--rm-ink);
+  font: 800 18px / 1.2 var(--rm-font-display);
+}
+.banner form {
+  margin: 0;
+}
+.reconnectMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin: 10px 4px 0;
+  color: var(--rm-muted);
+  font-size: 14px;
+}
+.reconnectMeta p {
+  margin: 0;
+}
+
+/* Connect step card */
+.step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 20px;
+  max-width: 680px;
+  padding: 28px;
+}
+.stepNumber {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--rm-grape-soft);
+  color: var(--rm-grape-dark);
+  font: 800 18px / 1 var(--rm-font-display);
+}
+.step h2 {
+  margin: 8px 0 8px;
+  font: 800 24px / 1.2 var(--rm-font-display);
+  letter-spacing: -0.02em;
+}
+.step p {
+  margin: 0 0 10px;
+  color: var(--rm-ink-2);
+}
+.step form {
+  margin: 14px 0 0;
+}
+.reassurance {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border-radius: var(--rm-radius-sm);
+  background: var(--rm-teal-soft);
+  color: var(--rm-teal-dark);
+  font-size: 14px;
+}
+.reassurance svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+}
+
+/* Signed-out */
+.signIn {
+  max-width: 520px;
+}
+.signIn p {
+  margin: 0 0 18px;
+}
+
+.form {
+  margin: 0;
+}
+
+@media (max-width: 860px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sidebar {
+    position: static;
+    order: -1;
+  }
+}
+@media (max-width: 640px) {
+  .pageHeader {
+    align-items: flex-start;
+  }
+  .headerActions {
+    width: 100%;
+    justify-items: stretch;
+  }
+  .headerActions a,
+  .headerActions button {
+    width: 100%;
+  }
+  .step {
+    gap: 14px;
+    padding: 22px 18px;
+  }
+  .stepNumber {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+  }
+  .step h2 {
+    margin-top: 4px;
+    font-size: 22px;
+  }
+  .step form {
+    display: grid;
+  }
+}
+.listBelow {
+  margin-top: 28px;
 }

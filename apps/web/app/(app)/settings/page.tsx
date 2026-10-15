@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import AppShell from "../../../components/AppShell";
+import controls from "../../../components/controls.module.css";
 import { configuredRuntime } from "../../../lib/runtime";
 import styles from "./page.module.css";
 
@@ -23,53 +25,60 @@ export default async function SettingsPage({
   if (state.kind !== "signed_in") redirect("/dashboard");
   const params = await searchParams;
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <a href="/">RecurMail</a>
-        <nav aria-label="Account">
-          <a href="/dashboard">Dashboard</a>
-        </nav>
-      </header>
-      <main className={styles.main}>
-        <p className={styles.eyebrow}>Account</p>
+    <AppShell email={state.user.email} active="settings">
+      <header className={styles.pageHeader}>
+        <p className={controls.eyebrow}>Account</p>
         <h1>Settings</h1>
-        <p>Signed in as {state.user.email}</p>
-        <section className={styles.card} aria-labelledby="delete-title">
+      </header>
+      <div className={styles.stack}>
+        <section className={controls.card} aria-labelledby="account-title">
+          <h2 id="account-title">Account</h2>
+          <div className={styles.accountRow}>
+            <p>
+              Signed in with Google as{" "}
+              <span className={styles.email}>{state.user.email}</span>
+            </p>
+            <form method="post" action="/auth/signout">
+              <button className={controls.secondary} type="submit">
+                Sign out
+              </button>
+            </form>
+          </div>
+        </section>
+        <section
+          className={`${controls.card} ${styles.danger}`}
+          aria-labelledby="delete-title"
+        >
           <h2 id="delete-title">Delete account</h2>
           <p>
             This permanently deletes your RecurMail account, schedules, email
-            content, send history, reconnect data and stored Gmail token.
+            content, send history, reconnect data and stored Gmail token. It
+            does not change anything in your Gmail account.
           </p>
-          <p>Type delete below to confirm.</p>
           {params.delete === "failed" ? (
-            <p className={styles.error} role="alert">
+            <p className={controls.error} role="alert">
               Account deletion could not finish. Your account is still
               available. Please try again.
             </p>
           ) : null}
-          <form method="post" action="/api/account">
-            <label htmlFor="confirmation">Confirmation</label>
+          <form className={styles.form} method="post" action="/api/account">
+            <label htmlFor="confirmation">Type delete to confirm</label>
             <input
               id="confirmation"
               name="confirmation"
               autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
               pattern="delete"
+              placeholder="delete"
               required
             />
-            <button type="submit">Delete account</button>
+            <button className={controls.danger} type="submit">
+              Delete account
+            </button>
           </form>
         </section>
-      </main>
-      <footer className={styles.footer}>
-        <nav aria-label="Legal">
-          <a href="/privacy">Privacy</a>
-          <a href="/terms">Terms</a>
-        </nav>
-        <p>
-          Gmail is a trademark of Google LLC. RecurMail is not affiliated with
-          Google.
-        </p>
-      </footer>
-    </div>
+      </div>
+    </AppShell>
   );
 }
