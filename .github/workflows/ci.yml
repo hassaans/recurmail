@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Typecheck, lint, unit and browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.18.3
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - name: Build the web app
+        run: pnpm --filter @recurmail/web build
+      - name: Keep Supabase project addresses out of browser output
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d apps/web/.next/static ] || [ ! -d apps/web/.next/server/app ]; then
+            echo "Web build output is missing; cannot scan for Supabase project addresses."
+            exit 1
+          fi
+          matches_file="$RUNNER_TEMP/supabase-address-matches.txt"
+          scan_status=0
+          grep -RIl --binary-files=without-match -i 'supabase\.co' apps/web/.next/static > "$matches_file" || scan_status=$?
+          if [ "$scan_status" -eq 0 ]; then
+            echo "Supabase project address found in static browser output."
+            exit 1
+          fi
+          if [ "$scan_status" -ne 1 ]; then
+            echo "Could not scan static browser output."
+            exit "$scan_status"
+          fi
+          scan_status=0
+          grep -RIl --binary-files=without-match --include='*.html' -i 'supabase\.co' apps/web/.next/server/app > "$matches_file" || scan_status=$?
+          if [ "$scan_status" -eq 0 ]; then
+            echo "Supabase project address found in prerendered HTML."
+            exit 1
+          fi
+          if [ "$scan_status" -ne 1 ]; then
+            echo "Could not scan prerendered HTML."
+            exit "$scan_status"
+          fi
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+
+  database-tests:
+    name: Database tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.120.0
+      - name: Start Supabase database and API
+        run: supabase start -x gotrue,realtime,storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+      - name: Verify local secret key works in apikey header only
+        shell: bash
+        run: |
+          set -euo pipefail
+          env_file="$RUNNER_TEMP/supabase-status.env"
+          supabase status -o env > "$env_file"
+          if ! grep -q '^SECRET_KEY=' "$env_file"; then
+            echo "::notice title=Supabase CLI key support::Supabase CLI 2.120.0 did not issue SECRET_KEY in 'supabase status -o env'; the local sb_secret API probe is unavailable."
+            exit 0
+          fi
+          set -a
+          source "$env_file"
+          set +a
+          case "$SECRET_KEY" in
+            sb_secret_*) ;;
+            *) echo "Supabase CLI SECRET_KEY is not an sb_secret key."; exit 1 ;;
+          esac
+          status=$(curl --silent --show-error --output "$RUNNER_TEMP/admin-metrics.json" --write-out '%{http_code}' \
+            --request POST \
+            --header "apikey: $SECRET_KEY" \
+            --header 'Content-Type: application/json' \
+            --data '{}' \
+            'http://127.0.0.1:54321/rest/v1/rpc/get_admin_metrics')
+          test "$status" = 200
+      - name: Run pgTAP database tests
+        run: supabase test db supabase/tests/rls.test.sql
+      - name: Run sender database tests
+        run: supabase test db supabase/tests/sender.test.sql
+      - name: Run sender recovery database tests
+        run: supabase test db supabase/tests/sender-recovery.test.sql
+      - name: Run reconnect outbox database tests
+        run: supabase test db supabase/tests/reconnect-outbox.test.sql
+      - name: Verify concurrent sender claims
+        run: bash supabase/tests/sender-concurrency.sh
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.6
+      - name: Run sender Edge Function tests
+        run: deno test --no-check --node-modules-dir=none --lock=supabase/functions/deno.lock --allow-env --allow-read --allow-net --allow-run --import-map=supabase/functions/import_map.json supabase/functions/send-due
+  secret-scan:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: false
