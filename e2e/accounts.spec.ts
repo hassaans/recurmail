@@ -8,6 +8,7 @@ import {
 } from "@playwright/test";
 import type { ScheduleRow } from "../apps/web/lib/schedules";
 import {
+  appOrigin,
   fakeSupabaseUrl,
   type Scenario,
   test,
@@ -21,7 +22,6 @@ import {
 
 const connectScope = "openid email https://www.googleapis.com/auth/gmail.send";
 const screenshotDir = resolve(__dirname, "../test-results/screenshots");
-const appOrigin = "http://127.0.0.1:3100";
 
 type SessionUser = { accessToken: string; refreshToken: string };
 
