@@ -7,6 +7,7 @@ import { renderToString } from "react-dom/server";
 import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import ConfirmForm from "../components/ConfirmForm";
+import DashboardNotices from "../components/DashboardNotices";
 import ScheduleEditor from "../components/ScheduleEditor";
 import ScheduleList from "../components/ScheduleList";
 import SchedulePauseButton from "../components/SchedulePauseButton";
@@ -37,6 +38,11 @@ type ConfirmFormPropsAreDataOnly = Assert<
 >;
 type SchedulePauseButtonPropsAreDataOnly = Assert<
   HasFunction<ComponentProps<typeof SchedulePauseButton>> extends false
+    ? true
+    : false
+>;
+type DashboardNoticesPropsAreDataOnly = Assert<
+  HasFunction<ComponentProps<typeof DashboardNotices>> extends false
     ? true
     : false
 >;
@@ -75,6 +81,7 @@ const listProps: ComponentProps<typeof ScheduleList> = {
       timezone: "Asia/Karachi",
       status: "active",
       next_send_at: "2026-10-19T04:15:00.000Z",
+      finished: null,
     },
   ],
   connectionStatus: "connected",
@@ -94,6 +101,15 @@ const pauseButtonProps: ComponentProps<typeof SchedulePauseButton> = {
   scheduleId: "c4a7b913-3d35-4c0d-8e7c-4c5d101f3f88",
   subject: "Weekly check-in",
   status: "paused",
+};
+const noticesProps: ComponentProps<typeof DashboardNotices> = {
+  notices: [
+    { tone: "success", text: "Schedule saved." },
+    {
+      tone: "warn",
+      text: "Google sign-in could not finish. Please try again.",
+    },
+  ],
 };
 
 function readSource(relativePath: string): string {
@@ -202,11 +218,13 @@ describe("server/client prop boundaries", () => {
     const listPropsAreDataOnly: ScheduleListPropsAreDataOnly = true;
     const confirmFormPropsAreDataOnly: ConfirmFormPropsAreDataOnly = true;
     const pauseButtonPropsAreDataOnly: SchedulePauseButtonPropsAreDataOnly = true;
+    const noticesPropsAreDataOnly: DashboardNoticesPropsAreDataOnly = true;
 
     expect(editorPropsAreDataOnly).toBe(true);
     expect(listPropsAreDataOnly).toBe(true);
     expect(confirmFormPropsAreDataOnly).toBe(true);
     expect(pauseButtonPropsAreDataOnly).toBe(true);
+    expect(noticesPropsAreDataOnly).toBe(true);
   });
 
   it("round-trips representative client component props through JSON", () => {
@@ -222,6 +240,7 @@ describe("server/client prop boundaries", () => {
     expect(JSON.parse(JSON.stringify(pauseButtonProps))).toEqual(
       pauseButtonProps,
     );
+    expect(JSON.parse(JSON.stringify(noticesProps))).toEqual(noticesProps);
   });
 
   it("renders each client component with react-dom/server", () => {
@@ -245,6 +264,25 @@ describe("server/client prop boundaries", () => {
     );
     expect(pausedList).toContain("Paused. Won&#x27;t send until you resume.");
     expect(pausedList).not.toContain("Next send");
+    expect(pausedList).toContain(">Resume<");
+    const finishedList = renderToString(
+      createElement(ScheduleList, {
+        ...listProps,
+        initialSchedules: [
+          {
+            ...listProps.initialSchedules[0],
+            status: "paused",
+            finished: { kind: "count", total: 3, sent: 3 },
+          },
+        ],
+      }),
+    );
+    expect(finishedList).toContain("Status </span>");
+    expect(finishedList).toContain(">Finished<");
+    expect(finishedList).toContain("Finished. Sent 3 of 3.");
+    expect(finishedList).toContain("Edit to restart");
+    expect(finishedList).not.toContain(">Resume<");
+    expect(finishedList).not.toContain("Resume all schedules");
     const waitingList = renderToString(
       createElement(ScheduleList, {
         ...listProps,
@@ -271,6 +309,16 @@ describe("server/client prop boundaries", () => {
       createElement(SchedulePauseButton, pauseButtonProps),
     );
     expect(pauseButton).toContain("Resume");
+    const notices = renderToString(
+      createElement(DashboardNotices, noticesProps),
+    );
+    expect(notices).toContain('role="status"');
+    expect(notices).toContain("Schedule saved.");
+    expect(notices).toContain("Google sign-in could not finish.");
+    expect(notices.match(/aria-label="Dismiss"/g)).toHaveLength(2);
+    expect(
+      renderToString(createElement(DashboardNotices, { notices: [] })),
+    ).toBe("");
   });
 
   it("keeps the server pages passing only data to imported client components", () => {

@@ -21,21 +21,6 @@
   justify-items: end;
   gap: 6px;
 }
-.status {
-  display: grid;
-  gap: 6px;
-  margin: 0 0 20px;
-  padding: 14px 18px;
-  border: 1px solid var(--rm-line);
-  border-radius: var(--rm-radius-sm);
-  background: var(--rm-paper);
-  color: var(--rm-ink-2);
-  font-size: 15px;
-}
-.status p {
-  margin: 0;
-}
-
 .grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 296px;

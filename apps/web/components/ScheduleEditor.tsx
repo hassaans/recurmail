@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildCustomRule,
   type CustomRule,
+  canonicalTimeZoneId,
   customFromRule,
   defaultCustomRule,
   describeRuleText,
@@ -34,7 +35,7 @@ import RecipientField, {
   recipientList,
 } from "./RecipientField";
 import styles from "./ScheduleEditor.module.css";
-import TimeZoneField from "./TimeZoneField";
+import TimeZoneField, { browserTimeZone } from "./TimeZoneField";
 
 interface ExistingSchedule {
   subject: string;
@@ -280,7 +281,7 @@ export default function ScheduleEditor({
   // weekday. Existing schedules keep what was saved.
   useEffect(() => {
     if (scheduleId) return;
-    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const zone = browserTimeZone() ?? "UTC";
     const defaults = scheduleDefaults(new Date(), zone);
     setTimezone(zone);
     setSelectedDays([defaults.weekday]);
@@ -317,7 +318,9 @@ export default function ScheduleEditor({
         setBcc({ values: existing.bcc, draft: "" });
         setShowCc(existing.cc.length > 0);
         setShowBcc(existing.bcc.length > 0);
-        setTimezone(existing.timezone);
+        // Schedules saved before the picker mapped legacy ids load under the
+        // canonical name; the API keeps accepting either.
+        setTimezone(canonicalTimeZoneId(existing.timezone));
         const mode = repeatFromRule(existing.rrule);
         setRepeat(mode);
         setTime(localTimeFromRule(existing.rrule));

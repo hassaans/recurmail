@@ -56,8 +56,16 @@ describe("summarizeSchedule", () => {
       timezone: "Asia/Karachi",
       status: "active",
       next_send_at: "2026-10-19T04:15:00.000Z",
+      finished: null,
     });
     expect(summarizeSchedule(row)).not.toHaveProperty("body_text");
     expect(summarizeSchedule(row)).not.toHaveProperty("user_id");
+  });
+
+  it("carries the finished info the server derived", () => {
+    const finished = { kind: "count" as const, total: 3, sent: 3 };
+    expect(
+      summarizeSchedule({ ...row, status: "paused" }, finished).finished,
+    ).toEqual(finished);
   });
 });

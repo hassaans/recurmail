@@ -49,6 +49,15 @@ function schedulePath(id: string, action?: "pause" | "resume") {
   return action ? `${base}/${action}` : base;
 }
 
+/** Finished schedules have no send left to resume; they restart from Edit. */
+function isFinished(schedule: ScheduleSummary): boolean {
+  return schedule.status === "paused" && schedule.finished !== null;
+}
+
+function resumable(schedule: ScheduleSummary): boolean {
+  return schedule.status === "paused" && !isFinished(schedule);
+}
+
 // The server renders the first list; this component owns pause, resume,
 // pause-all, resume-all and delete. Each action confirms when it is broad or
 // destructive, shows a pending label on the clicked control, and reports the
@@ -81,20 +90,39 @@ export default function ScheduleList({
       : ((await response.json()) as { schedule?: ScheduleRow });
   }
 
+  // The finished check runs on the server when the page renders. Reloads keep
+  // it for a schedule that is still paused; the actions here never finish or
+  // restart a schedule, so the server's answer stays current.
+  function keepFinished(
+    row: ScheduleRow,
+    known: ScheduleSummary | undefined,
+  ): ScheduleSummary {
+    return summarizeSchedule(
+      row,
+      row.status === "paused" ? (known?.finished ?? null) : null,
+    );
+  }
+
   async function reload() {
     const response = await fetch("/api/schedules", {
       credentials: "same-origin",
     });
     if (!response.ok) throw new Error("Schedules could not be loaded.");
     const result = (await response.json()) as { schedules?: ScheduleRow[] };
-    setSchedules((result.schedules ?? []).map(summarizeSchedule));
+    setSchedules((current) =>
+      (result.schedules ?? []).map((row) =>
+        keepFinished(
+          row,
+          current.find((schedule) => schedule.id === row.id),
+        ),
+      ),
+    );
   }
 
   function applyUpdate(row: ScheduleRow) {
-    const updated = summarizeSchedule(row);
     setSchedules((current) =>
       current.map((schedule) =>
-        schedule.id === updated.id ? updated : schedule,
+        schedule.id === row.id ? keepFinished(row, schedule) : schedule,
       ),
     );
   }
@@ -178,7 +206,7 @@ export default function ScheduleList({
   async function confirmResumeAll() {
     setPending({ kind: "resume-all" });
     setBulkError(null);
-    const paused = schedules.filter((s) => s.status === "paused");
+    const paused = schedules.filter(resumable);
     let resumed = 0;
     try {
       for (const schedule of paused) {
@@ -232,8 +260,11 @@ export default function ScheduleList({
   }
 
   const activeCount = schedules.filter((s) => s.status === "active").length;
-  const pausedCount = schedules.filter((s) => s.status === "paused").length;
-  const allPaused = schedules.length > 0 && pausedCount === schedules.length;
+  const pausedCount = schedules.filter(resumable).length;
+  // Finished schedules cannot be resumed, so "Resume all" only appears when
+  // every schedule is paused and at least one of them can start again.
+  const allPaused =
+    pausedCount > 0 && schedules.every((s) => s.status === "paused");
   const bulkDialog =
     bulk === "pause-all"
       ? {
@@ -298,7 +329,12 @@ export default function ScheduleList({
           </div>
           <ul className={styles.list}>
             {schedules.map((schedule) => {
-              const state = scheduleState(schedule.status, connectionStatus);
+              const finished = isFinished(schedule);
+              const state = scheduleState(
+                schedule.status,
+                connectionStatus,
+                finished ? schedule.finished : null,
+              );
               const id = encodeURIComponent(schedule.id);
               const toggleAction =
                 schedule.status === "active" ? "pause" : "resume";
@@ -351,10 +387,12 @@ export default function ScheduleList({
                     <div className={styles.actions}>
                       {canEdit ? (
                         <a
-                          className={`${controls.secondary} ${controls.small}`}
+                          className={`${
+                            finished ? controls.primary : controls.secondary
+                          } ${controls.small}`}
                           href={`/schedules/${id}/edit`}
                         >
-                          Edit
+                          {finished ? "Edit to restart" : "Edit"}
                         </a>
                       ) : null}
                       <a
@@ -363,29 +401,31 @@ export default function ScheduleList({
                       >
                         History
                       </a>
-                      <button
-                        className={`${
-                          schedule.status === "paused"
-                            ? controls.primary
-                            : controls.secondary
-                        } ${controls.small}`}
-                        type="button"
-                        disabled={busy || schedule.status === "sending"}
-                        onClick={() => toggle(schedule)}
-                      >
-                        {togglePending ? (
-                          <>
-                            <Spinner />
-                            {toggleAction === "pause"
-                              ? "Pausing…"
-                              : "Resuming…"}
-                          </>
-                        ) : toggleAction === "pause" ? (
-                          "Pause"
-                        ) : (
-                          "Resume"
-                        )}
-                      </button>
+                      {finished ? null : (
+                        <button
+                          className={`${
+                            schedule.status === "paused"
+                              ? controls.primary
+                              : controls.secondary
+                          } ${controls.small}`}
+                          type="button"
+                          disabled={busy || schedule.status === "sending"}
+                          onClick={() => toggle(schedule)}
+                        >
+                          {togglePending ? (
+                            <>
+                              <Spinner />
+                              {toggleAction === "pause"
+                                ? "Pausing…"
+                                : "Resuming…"}
+                            </>
+                          ) : toggleAction === "pause" ? (
+                            "Pause"
+                          ) : (
+                            "Resume"
+                          )}
+                        </button>
+                      )}
                       <span className={styles.spacer} />
                       <button
                         className={`${controls.dangerQuiet} ${controls.small}`}

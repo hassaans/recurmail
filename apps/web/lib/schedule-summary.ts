@@ -1,3 +1,4 @@
+import type { FinishedInfo } from "./schedule-state";
 import type { ScheduleRow } from "./schedules";
 
 /**
@@ -13,9 +14,14 @@ export interface ScheduleSummary {
   timezone: string;
   status: ScheduleRow["status"];
   next_send_at: string;
+  /** Set on the server when a paused schedule's rule has run out. */
+  finished: FinishedInfo | null;
 }
 
-export function summarizeSchedule(row: ScheduleRow): ScheduleSummary {
+export function summarizeSchedule(
+  row: ScheduleRow,
+  finished: FinishedInfo | null = null,
+): ScheduleSummary {
   return {
     id: row.id,
     subject: row.subject,
@@ -24,6 +30,7 @@ export function summarizeSchedule(row: ScheduleRow): ScheduleSummary {
     timezone: row.timezone,
     status: row.status,
     next_send_at: row.next_send_at,
+    finished,
   };
 }
 
