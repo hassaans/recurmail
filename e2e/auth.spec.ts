@@ -25,7 +25,7 @@ test("signed-out visitor sees Google sign-in on the dashboard", async ({
   const response = await page.goto("/dashboard");
   expect(response?.status()).toBe(200);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "Your Gmail connection",
+    "Sign in to RecurMail",
   );
   await expect(
     page.getByRole("link", { name: "Sign in with Google" }),
@@ -193,7 +193,7 @@ test("connected and reconnect states use safe metadata and offer disconnect", as
     page.getByText("Your Gmail permission needs renewing", { exact: false }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Connect Gmail", exact: true }),
+    page.getByRole("button", { name: "Reconnect Gmail", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Disconnect", exact: true }),
@@ -314,7 +314,18 @@ test("signed-in Connect Gmail exchanges PKCE, encrypts the row, then Disconnect 
     ]).toString(),
   ).toBe(scenario.gmailRefreshToken);
   expect(connected.schedules).toEqual(before.schedules);
-  await page.getByRole("button", { name: "Disconnect", exact: true }).click();
+  // The page has just arrived from the OAuth redirect; retry the click until
+  // the confirmation dialog opens so a click before hydration is not lost.
+  const confirmDisconnect = page.getByRole("dialog", {
+    name: "Disconnect Gmail?",
+  });
+  await expect(async () => {
+    await page.getByRole("button", { name: "Disconnect", exact: true }).click();
+    await expect(confirmDisconnect).toBeVisible({ timeout: 1000 });
+  }).toPass();
+  await confirmDisconnect
+    .getByRole("button", { name: "Disconnect Gmail", exact: true })
+    .click();
   await expect(page).toHaveURL(/\/dashboard\?gmail=disconnected$/);
   await expect(page.getByRole("status")).toContainText(
     "All your schedules are paused",
