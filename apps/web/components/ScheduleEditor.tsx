@@ -29,6 +29,7 @@ import {
   weekdaysFromRule,
 } from "../lib/schedule-editor";
 import { TEST_SEND_LIMIT } from "../lib/test-send-limit";
+import type { SenderAccount } from "../lib/schedule-summary";
 import RecipientField, {
   emptyRecipients,
   invalidRecipientCount,
@@ -40,6 +41,7 @@ import TimeZoneField, { browserTimeZone } from "./TimeZoneField";
 import Toast, { type ToastMessage } from "./Toast";
 
 interface ExistingSchedule {
+  gmail_connection_id: string | null;
   subject: string;
   body_text: string;
   body_html: string | null;
@@ -51,6 +53,7 @@ interface ExistingSchedule {
 }
 
 interface FieldErrors {
+  sender?: string;
   to?: string;
   cc?: string;
   bcc?: string;
@@ -251,18 +254,26 @@ function rateLimitMessage(fallback: string, retryAt: unknown): string {
 export default function ScheduleEditor({
   scheduleId,
   userEmail,
-  senderEmail,
+  accounts,
 }: {
   scheduleId?: string;
   /** The signed-in account; the only address a test email ever goes to. */
   userEmail: string;
-  /** The connected Gmail address a test is sent from, or null when none is connected. */
-  senderEmail: string | null;
+  /** Every Gmail account the user has connected, oldest first. */
+  accounts: SenderAccount[];
 }) {
   const router = useRouter();
   const bodyRef = useRef<HTMLDivElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  // The account this schedule sends from. A new schedule starts on the first
+  // account that can send; an existing one keeps what was saved, which is
+  // empty once that account has been disconnected.
+  const [sender, setSender] = useState(() =>
+    scheduleId
+      ? ""
+      : (accounts.find((account) => account.status === "connected")?.id ?? ""),
+  );
   const [subject, setSubject] = useState("");
   const [to, setTo] = useState<RecipientValue>(emptyRecipients);
   const [cc, setCc] = useState<RecipientValue>(emptyRecipients);
@@ -337,11 +348,16 @@ export default function ScheduleEditor({
       .then(async (response) => {
         const result = await response.json();
         if (!response.ok)
-          throw new Error(result.message ?? "Could not load schedule");
+          throw new Error(
+            result.error?.message ??
+              result.message ??
+              "Could not load schedule",
+          );
         return result.schedule as ExistingSchedule;
       })
       .then((existing) => {
         if (cancelled) return;
+        setSender(existing.gmail_connection_id ?? "");
         setSubject(existing.subject);
         setTo({ values: existing.to, draft: "" });
         setCc({ values: existing.cc, draft: "" });
@@ -435,6 +451,7 @@ export default function ScheduleEditor({
 
   // Everything that ends up in the saved schedule, except the message body.
   const fingerprint = JSON.stringify({
+    sender,
     subject,
     to,
     cc,
@@ -528,6 +545,7 @@ export default function ScheduleEditor({
 
   function validate(): FieldErrors {
     const errors: FieldErrors = {};
+    if (!sender) errors.sender = "Choose a Gmail account to send from.";
     const toList = recipientList(to);
     if (toList.length === 0) errors.to = "Add at least one recipient.";
     else if (invalidRecipientCount(to) > 0)
@@ -563,6 +581,7 @@ export default function ScheduleEditor({
 
   function focusFirstError(errors: FieldErrors) {
     const order: [keyof FieldErrors, string][] = [
+      ["sender", "sender"],
       ["to", "to"],
       ["cc", "cc"],
       ["bcc", "bcc"],
@@ -634,6 +653,7 @@ export default function ScheduleEditor({
     const bodyHtml = bodyRef.current?.innerHTML ?? "";
     const bodyText = bodyRef.current?.innerText ?? "";
     const payload = {
+      gmail_connection_id: sender,
       subject,
       body_text: bodyText,
       body_html: bodyHtml,
@@ -658,7 +678,9 @@ export default function ScheduleEditor({
       );
       const result = await response.json();
       if (!response.ok)
-        throw new Error(result.message ?? "Could not save schedule");
+        throw new Error(
+          result.error?.message ?? result.message ?? "Could not save schedule",
+        );
       const returnedWarning =
         typeof result.warning === "string" ? result.warning : "";
       setWarning(returnedWarning);
@@ -677,12 +699,20 @@ export default function ScheduleEditor({
     }
   }
 
-  // A test email goes to the signed-in user only, never to the recipients above.
-  const testHint = !senderEmail
+  // A test email goes to the signed-in user only, never to the recipients
+  // above, and it goes out from the account chosen in the From field.
+  const selectedAccount = accounts.find((account) => account.id === sender);
+  const testSender =
+    selectedAccount?.status === "connected" ? selectedAccount : null;
+  const testHint = !accounts.some((account) => account.status === "connected")
     ? "Connect Gmail to send yourself a test."
-    : !subject.trim() || messageEmpty
-      ? "Add a subject and a message first."
-      : null;
+    : !selectedAccount
+      ? "Choose a Gmail account to send from first."
+      : !testSender
+        ? `Reconnect ${selectedAccount.email} from your dashboard to send a test from it.`
+        : !subject.trim() || messageEmpty
+          ? "Add a subject and a message first."
+          : null;
   const canSendTest = testHint === null && !testing;
 
   async function sendTest() {
@@ -690,8 +720,10 @@ export default function ScheduleEditor({
     setTestError(null);
     setToast(null);
     setTesting(true);
-    // Exactly what save would send: the current draft, unsaved edits included.
+    // Exactly what save would send: the current draft, unsaved edits
+    // included, from the account in the From field.
     const payload = {
+      gmail_connection_id: sender,
       subject,
       body_text: bodyRef.current?.innerText ?? "",
       body_html: bodyRef.current?.innerHTML ?? "",
@@ -759,7 +791,46 @@ export default function ScheduleEditor({
           <section className={styles.card} aria-labelledby="message-title">
             <div className={styles.cardHead}>
               <h2 id="message-title">Email</h2>
-              <p>Who gets it and what it says.</p>
+              <p>Who sends it, who gets it and what it says.</p>
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="sender">From</label>
+              <div className={styles.selectWrap}>
+                <select
+                  id="sender"
+                  className={fieldErrors.sender ? styles.invalid : ""}
+                  value={sender}
+                  onChange={(event) => setSender(event.target.value)}
+                  aria-invalid={fieldErrors.sender ? true : undefined}
+                  aria-describedby={
+                    fieldErrors.sender ? "sender-error" : "sender-hint"
+                  }
+                >
+                  {sender ? null : (
+                    <option value="">Choose a Gmail account</option>
+                  )}
+                  {accounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.status === "connected"
+                        ? account.email
+                        : `${account.email} (needs reconnect)`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {fieldErrors.sender ? (
+                <p id="sender-error" className={styles.fieldError}>
+                  {fieldErrors.sender}
+                </p>
+              ) : (
+                <p id="sender-hint" className={styles.hint}>
+                  {!sender
+                    ? "No sender. Choose a Gmail account."
+                    : selectedAccount && selectedAccount.status !== "connected"
+                      ? "This account needs reconnecting from your dashboard before it can send."
+                      : "Recipients see this address as the sender."}
+                </p>
+              )}
             </div>
             <RecipientField
               id="to"
@@ -933,15 +1004,15 @@ export default function ScheduleEditor({
                   )}
                 </button>
                 <p id="test-send-hint" className={styles.testSendHint}>
-                  {senderEmail ? (
+                  {testSender ? (
                     <>
                       We&apos;ll send it to you at <strong>{userEmail}</strong>{" "}
-                      from <strong>{senderEmail}</strong>.
+                      from <strong>{testSender.email}</strong>.
                     </>
                   ) : null}
                   {testHint ? (
                     <>
-                      {senderEmail ? " " : ""}
+                      {testSender ? " " : ""}
                       {testHint}
                     </>
                   ) : null}

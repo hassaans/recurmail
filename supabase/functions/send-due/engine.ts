@@ -5,6 +5,8 @@ import { GmailError, type GmailSchedule, sendSchedule } from "./gmail.ts";
 export type ClaimedSchedule = GmailSchedule & {
   schedule_id: string;
   user_id: string;
+  /** The Gmail account this schedule sends from. */
+  gmail_connection_id: string;
   scheduled_for: string;
   encrypted_refresh_token: string;
   rrule: string;
@@ -40,6 +42,7 @@ export type SenderStore = {
   reconnect(input: {
     scheduleId: string;
     userId: string;
+    connectionId: string;
     scheduledFor: string;
     recipient: string;
     reconnectUrl: string;
@@ -92,7 +95,10 @@ export async function runSender(
   let noticesSent = 0;
   let noticesFailed = 0;
   const send = config.send ?? sendSchedule;
-  const reconnectUsers = new Set<string>();
+  // Accounts whose refresh token Google rejected during this run. Later
+  // claims for the same account are failed without another send attempt,
+  // while the user's other accounts keep sending.
+  const reconnectConnections = new Set<string>();
 
   const errorCodeFor = (error: unknown): string =>
     error instanceof GmailError ? error.code : "sender_internal_error";
@@ -151,11 +157,12 @@ export async function runSender(
     schedules = await store.claim(50);
     for (const schedule of schedules) {
       const scheduledFor = new Date(schedule.scheduled_for);
-      if (reconnectUsers.has(schedule.user_id)) {
+      if (reconnectConnections.has(schedule.gmail_connection_id)) {
         try {
           await store.reconnect({
             scheduleId: schedule.schedule_id,
             userId: schedule.user_id,
+            connectionId: schedule.gmail_connection_id,
             scheduledFor: schedule.scheduled_for,
             recipient: schedule.google_email,
             reconnectUrl: `${config.appUrl.replace(/\/$/, "")}/dashboard?gmail=failed`,
@@ -198,11 +205,12 @@ export async function runSender(
         }
       } catch (error) {
         if (error instanceof GmailError && error.outcome === "invalid_grant") {
-          reconnectUsers.add(schedule.user_id);
+          reconnectConnections.add(schedule.gmail_connection_id);
           try {
             await store.reconnect({
               scheduleId: schedule.schedule_id,
               userId: schedule.user_id,
+              connectionId: schedule.gmail_connection_id,
               scheduledFor: schedule.scheduled_for,
               recipient: schedule.google_email,
               reconnectUrl: `${config.appUrl.replace(/\/$/, "")}/dashboard?gmail=failed`,

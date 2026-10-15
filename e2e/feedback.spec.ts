@@ -42,7 +42,7 @@ const daily = {
 
 // Hold a matching request until the test releases it, so the pending label
 // can be asserted without depending on timing. The real server still answers.
-async function hold(page: Page, pattern: string, method: string) {
+async function hold(page: Page, pattern: string | RegExp, method: string) {
   let release = () => {};
   const held = new Promise<void>((resolve) => {
     release = resolve;
@@ -366,35 +366,44 @@ test.describe("disconnect", () => {
     ).toBeVisible();
 
     // First attempt: the request never reaches the server.
-    await page.route("**/api/gmail/disconnect", (route) => route.abort());
+    const disconnectRoute = /\/api\/gmail\/disconnect(\?|$)/;
+    await page.route(disconnectRoute, (route) => route.abort());
     await page.getByRole("button", { name: "Disconnect", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Disconnect Gmail?" });
+    const dialog = page.getByRole("dialog", {
+      name: `Disconnect ${scenario.owner.email}?`,
+    });
     await expect(dialog).toBeVisible();
-    await dialog.getByRole("button", { name: "Disconnect Gmail" }).click();
+    await dialog
+      .getByRole("button", { name: "Disconnect", exact: true })
+      .click();
     await expect(dialog.getByRole("alert")).toHaveText(
       "That could not finish. Check your connection and try again.",
     );
     await expect(dialog.getByRole("button", { name: "Cancel" })).toBeEnabled();
     await expect(
-      dialog.getByRole("button", { name: "Disconnect Gmail" }),
+      dialog.getByRole("button", { name: "Disconnect", exact: true }),
     ).toBeEnabled();
     await expect(page).toHaveURL(/\/dashboard$/);
-    await page.unroute("**/api/gmail/disconnect");
+    await page.unroute(disconnectRoute);
 
     // Second attempt from the same dialog: held so the pending state is
     // visible, then released to the real server.
-    const release = await hold(page, "**/api/gmail/disconnect", "POST");
-    await dialog.getByRole("button", { name: "Disconnect Gmail" }).click();
+    const release = await hold(page, disconnectRoute, "POST");
+    await dialog
+      .getByRole("button", { name: "Disconnect", exact: true })
+      .click();
     await expect(
       dialog.getByRole("button", { name: "Disconnecting…" }),
     ).toBeDisabled();
     await expect(dialog.getByRole("button", { name: "Cancel" })).toBeDisabled();
     await expect(dialog.getByRole("alert")).toHaveCount(0);
     release();
-    await expect(page).toHaveURL(/\/dashboard\?gmail=disconnected$/);
-    await expect(status(page, "Gmail is disconnected.")).toContainText(
-      "All your schedules are paused",
+    await expect(page).toHaveURL(
+      `http://127.0.0.1:3100/dashboard?gmail=disconnected&email=${encodeURIComponent(scenario.owner.email)}`,
     );
+    await expect(
+      status(page, `Disconnected ${scenario.owner.email}.`),
+    ).toContainText("Its schedules are paused.");
     await expect(
       page.getByRole("button", { name: "Connect Gmail", exact: true }),
     ).toBeVisible();
@@ -402,7 +411,7 @@ test.describe("disconnect", () => {
 });
 
 test.describe("without a working Gmail connection", () => {
-  test("not-connected cards say they are waiting for Gmail and the connect card is the only call to action", async ({
+  test("cards without a sender say so and the connect card is the only call to action", async ({
     page,
     context,
     scenario,
@@ -422,19 +431,22 @@ test.describe("without a working Gmail connection", () => {
       page.getByText("Send from your own Gmail", { exact: true }),
     ).toHaveCSS("text-transform", "none");
 
-    // The owner fixture has one active and one paused schedule.
-    const waiting = card(page, "Waiting for Gmail");
-    await expect(waiting).toHaveCount(1);
-    await expect(waiting).toContainText("Status Waiting for Gmail");
-    await expect(waiting).toContainText("Won't send until you connect Gmail.");
-    await expect(waiting).not.toContainText("Next send");
-    const paused = card(page, "Paused. Won't send until you resume.");
-    await expect(paused).toHaveCount(1);
-    await expect(paused).toContainText("Status Paused");
-    await expect(paused).not.toContainText("Next send");
+    // The owner fixture has two paused schedules whose sender was removed.
+    // With no account to choose from, there is nothing to do on them yet.
+    const noSender = card(page, "No sender. Choose a Gmail account.");
+    await expect(noSender).toHaveCount(2);
+    await expect(noSender.first()).toContainText("Status No sender");
+    await expect(noSender.last()).toContainText("Status No sender");
+    await expect(noSender.first()).not.toContainText("Next send");
     await expect(page.getByText("Active", { exact: true })).toHaveCount(0);
     await expect(
       page.getByRole("link", { name: "Edit", exact: true }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Choose sender" })).toHaveCount(
+      0,
+    );
+    await expect(
+      page.getByRole("button", { name: "Resume", exact: true }),
     ).toHaveCount(0);
   });
 
@@ -462,20 +474,28 @@ test.describe("without a working Gmail connection", () => {
     const row = card(page, "Fixture reminder");
     await expect(row).toHaveCount(1);
     await expect(row).toContainText("Status Needs reconnect");
-    await expect(row).toContainText("Paused until you reconnect Gmail.");
+    await expect(row).toContainText(
+      `Paused until you reconnect ${scenario.reconnect.email}.`,
+    );
     await expect(row).not.toContainText("Next send");
     await expect(
       row.getByRole("link", { name: "Edit", exact: true }),
     ).toHaveCount(0);
     await expect(row.getByRole("link", { name: "History" })).toBeVisible();
 
-    // Pausing still works without a Gmail connection.
+    // Pausing still works while the account needs reconnecting. The row
+    // keeps asking for the reconnect and does not offer Resume until then.
     await row.getByRole("button", { name: "Pause", exact: true }).click();
     await expect(status(page, "Paused “Fixture reminder”.")).toBeVisible();
-    await expect(row).toContainText("Status Paused");
-    await expect(row).toContainText("Paused. Won't send until you resume.");
+    await expect(row).toContainText("Status Needs reconnect");
+    await expect(row).toContainText(
+      `Paused until you reconnect ${scenario.reconnect.email}.`,
+    );
     await expect(
       row.getByRole("button", { name: "Resume", exact: true }),
-    ).toBeEnabled();
+    ).toHaveCount(0);
+    await expect(
+      row.getByRole("button", { name: "Pause", exact: true }),
+    ).toHaveCount(0);
   });
 });

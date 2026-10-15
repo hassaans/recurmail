@@ -1,6 +1,11 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
-import type { ConnectionStore } from "./connections";
+import {
+  ConnectionLimitError,
+  type ConnectionStore,
+  isConnectionId,
+  MAX_GMAIL_CONNECTIONS,
+} from "./connections";
 import { decryptRefreshToken, encryptRefreshToken } from "./crypto";
 import type { GoogleProvider } from "./google";
 import { cookieHeader, readCookie, redirectResponse, sameOrigin } from "./http";
@@ -24,8 +29,13 @@ export function createGmailHandlers(config: {
 }) {
   const now = config.now ?? Date.now;
   const callbackUri = `${config.origin}/api/gmail/callback`;
-  const result = (status: string) =>
-    redirectResponse(config.origin, `/dashboard?gmail=${status}`);
+  const result = (status: string, email?: string) =>
+    redirectResponse(
+      config.origin,
+      `/dashboard?gmail=${status}${
+        email ? `&email=${encodeURIComponent(email)}` : ""
+      }`,
+    );
   const signIn = () =>
     redirectResponse(config.origin, "/dashboard?auth=required");
   const forbidden = () =>
@@ -40,19 +50,44 @@ export function createGmailHandlers(config: {
     );
     return response;
   }
+  // The connection to reconnect, if the form named one. Anything else means
+  // "add another account".
+  async function requestedConnectionId(
+    request: Request,
+  ): Promise<string | null> {
+    if (
+      !request.headers
+        .get("content-type")
+        ?.startsWith("application/x-www-form-urlencoded")
+    )
+      return null;
+    const form = await request.formData();
+    const id = form.get("id");
+    return typeof id === "string" && isConnectionId(id) ? id : null;
+  }
   return {
     async connect(request: Request): Promise<Response> {
       if (!sameOrigin(request, config.origin)) return forbidden();
       try {
         const identity = await config.authenticate(request);
         if (!identity) return signIn();
+        const connectionId = await requestedConnectionId(request);
+        const connections = await config.store.list(
+          identity.user.id,
+          identity.accessToken,
+        );
+        const reconnecting = connectionId
+          ? connections.find((connection) => connection.id === connectionId)
+          : undefined;
+        if (!reconnecting && connections.length >= MAX_GMAIL_CONNECTIONS)
+          return result("limit");
         const state = randomBytes(32).toString("base64url");
         const verifier = randomBytes(32).toString("base64url");
         const envelope = encryptRefreshToken(
           JSON.stringify({
             state,
             verifier,
-            email: identity.user.email,
+            hint: reconnecting?.google_email ?? null,
             expiresAt: now() + stateLifetime,
           }),
           config.key,
@@ -63,7 +98,7 @@ export function createGmailHandlers(config: {
           config.google.authorizationUrl({
             redirectUri: callbackUri,
             state,
-            email: identity.user.email,
+            ...(reconnecting ? { email: reconnecting.google_email } : {}),
             challenge: createHash("sha256")
               .update(verifier)
               .digest("base64url"),
@@ -91,6 +126,8 @@ export function createGmailHandlers(config: {
         if (!identity) return clearState(signIn());
         const envelope = readCookie(request, stateCookie);
         if (!envelope) return clearState(result("failed"));
+        // The envelope is bound to the signed-in user id through the cipher's
+        // associated data, so another user's cookie cannot complete this flow.
         const saved = JSON.parse(
           decryptRefreshToken(envelope, config.key, identity.user.id),
         );
@@ -100,7 +137,6 @@ export function createGmailHandlers(config: {
           typeof saved.verifier !== "string" ||
           !/^[A-Za-z0-9_-]{43}$/.test(saved.verifier) ||
           saved.state !== params.get("state") ||
-          saved.email !== identity.user.email ||
           !Number.isFinite(saved.expiresAt) ||
           saved.expiresAt <= now()
         )
@@ -113,19 +149,19 @@ export function createGmailHandlers(config: {
           );
         const code = params.get("code");
         if (!code) return clearState(result("failed"));
-        token = await config.google.exchangeCode(
+        const granted = await config.google.exchangeCode(
           code,
           callbackUri,
           saved.verifier,
         );
+        token = granted.refreshToken;
+        // The account comes from the ID token Google returned with the grant,
+        // so a user who picked a different account than the one hinted gets
+        // that account connected, and the notice names it.
         await config.store.save({
           user_id: identity.user.id,
-          google_email: identity.user.email,
-          is_workspace: !["gmail.com", "googlemail.com"].includes(
-            identity.user.email
-              .slice(identity.user.email.lastIndexOf("@") + 1)
-              .toLowerCase(),
-          ),
+          google_email: granted.email,
+          is_workspace: granted.isWorkspace,
           encrypted_refresh_token: encryptRefreshToken(
             token,
             config.key,
@@ -134,9 +170,10 @@ export function createGmailHandlers(config: {
           status: "connected",
           connected_at: new Date(now()).toISOString(),
         });
-        return clearState(result("connected"));
-      } catch {
-        console.error("[ERROR] gmail_callback_failed");
+        return clearState(result("connected", granted.email));
+      } catch (error) {
+        const limit = error instanceof ConnectionLimitError;
+        if (!limit) console.error("[ERROR] gmail_callback_failed");
         // A grant that could not be persisted must not remain active at Google.
         if (token) {
           try {
@@ -145,7 +182,7 @@ export function createGmailHandlers(config: {
             console.error("[ERROR] gmail_compensating_revocation_failed");
           }
         }
-        return clearState(result("failed"));
+        return clearState(result(limit ? "limit" : "failed"));
       }
     },
     async disconnect(request: Request): Promise<Response> {
@@ -153,17 +190,25 @@ export function createGmailHandlers(config: {
       try {
         const identity = await config.authenticate(request);
         if (!identity) return signIn();
+        const id = new URL(request.url).searchParams.get("id") ?? "";
+        if (!isConnectionId(id)) return result("disconnect_failed");
         // Pause first so a revocation outage cannot leave future sends active.
-        await config.store.pauseSchedules(identity.user.id);
-        const encrypted = await config.store.readEncryptedToken(
+        await config.store.pauseSchedules(identity.user.id, id);
+        const credential = await config.store.readCredential(
           identity.user.id,
+          id,
         );
-        if (encrypted)
-          await config.google.revoke(
-            decryptRefreshToken(encrypted, config.key, identity.user.id),
-          );
-        await config.store.delete(identity.user.id);
-        return clearState(result("disconnected"));
+        // Already gone: a repeated submit has nothing left to revoke.
+        if (!credential) return result("disconnected");
+        await config.google.revoke(
+          decryptRefreshToken(
+            credential.encrypted_refresh_token,
+            config.key,
+            identity.user.id,
+          ),
+        );
+        await config.store.delete(identity.user.id, id);
+        return clearState(result("disconnected", credential.google_email));
       } catch {
         console.error("[ERROR] gmail_disconnect_failed");
         // Retain the encrypted credential until revocation succeeds, allowing retry.

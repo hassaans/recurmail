@@ -52,7 +52,7 @@ export default async function SettingsPage({
           <h2 id="delete-title">Delete account</h2>
           <p>
             This permanently deletes your RecurMail account, schedules, email
-            content, send history, reconnect data and stored Gmail token. It
+            content, send history, reconnect data and stored Gmail tokens. It
             does not change anything in your Gmail account.
           </p>
           {params.delete === "failed" ? (

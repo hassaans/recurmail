@@ -88,7 +88,7 @@ test("Google sign-in callback with fake Supabase leads to Connect Gmail without 
     page.getByRole("button", { name: "Connect Gmail", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("Connect the same Google account you used to sign in", {
+    page.getByText("Connect the Google account you want to send from", {
       exact: false,
     }),
   ).toBeVisible();
@@ -102,7 +102,7 @@ test("Google sign-in callback with fake Supabase leads to Connect Gmail without 
   expect(JSON.stringify(cookies)).not.toContain("fake-google");
 });
 
-test("Connect Gmail uses the signed-in email and permission denial explains the need and offers retry", async ({
+test("Connect Gmail asks Google for send permission plus the granting account, and permission denial explains the need and offers retry", async ({
   page,
   context,
   scenario,
@@ -137,11 +137,14 @@ test("Connect Gmail uses the signed-in email and permission denial explains the 
   const consent = new URL(consentUrl);
   expect(consent.origin).toBe(fakeSupabaseUrl);
   expect(consent.searchParams.get("scope")).toBe(
-    "https://www.googleapis.com/auth/gmail.send",
+    "openid email https://www.googleapis.com/auth/gmail.send",
   );
-  expect(consent.searchParams.get("login_hint")).toBe(scenario.owner.email);
+  // The first account is chosen on Google's chooser, not pinned to the
+  // sign-in address, so no login_hint and the chooser is forced.
+  expect(consent.searchParams.get("login_hint")).toBeNull();
   expect(consent.searchParams.get("access_type")).toBe("offline");
-  expect(consent.searchParams.get("prompt")).toBe("consent");
+  expect(consent.searchParams.get("prompt")).toBe("consent select_account");
+  expect(consent.searchParams.get("include_granted_scopes")).toBe("false");
   const callback = new URL(consent.searchParams.get("redirect_uri") ?? "");
   callback.searchParams.set("state", consent.searchParams.get("state") ?? "");
   callback.searchParams.set("error", "access_denied");
@@ -176,7 +179,7 @@ test("connected and reconnect states use safe metadata and offer disconnect", as
   ]);
   await page.goto("/dashboard");
   await expect(
-    page.getByRole("heading", { name: "Gmail is connected", exact: true }),
+    page.getByRole("heading", { name: "Gmail accounts", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Disconnect", exact: true }),
@@ -226,7 +229,7 @@ test("an expired Supabase session refreshes through the server and a forged sess
   ).toBeVisible();
 });
 
-test("signed-in Connect Gmail exchanges PKCE, encrypts the row, then Disconnect revokes, deletes and pauses only owner schedules", async ({
+test("signed-in Connect Gmail exchanges PKCE, encrypts the row, then Disconnect revokes, deletes and pauses only the schedules sending from it", async ({
   page,
   context,
   request,
@@ -275,9 +278,14 @@ test("signed-in Connect Gmail exchanges PKCE, encrypts the row, then Disconnect 
   await page
     .getByRole("button", { name: "Connect Gmail", exact: true })
     .click();
-  await expect(page).toHaveURL(/\/dashboard\?gmail=connected$/);
+  await expect(page).toHaveURL(
+    `http://127.0.0.1:3100/dashboard?gmail=connected&email=${encodeURIComponent(scenario.owner.email)}`,
+  );
   await expect(
-    page.getByRole("heading", { name: "Gmail is connected", exact: true }),
+    page.getByRole("status").filter({ hasText: "Connected " }),
+  ).toContainText(`Connected ${scenario.owner.email}.`);
+  await expect(
+    page.getByRole("heading", { name: "Gmail accounts", exact: true }),
   ).toBeVisible();
   await assertNoTokens();
   expect(
@@ -288,7 +296,11 @@ test("signed-in Connect Gmail exchanges PKCE, encrypts the row, then Disconnect 
   const connected = await snapshot();
   expect(connected.exchanges).toEqual([
     { scope: "openid email profile", pkceVerified: true },
-    { scope: "https://www.googleapis.com/auth/gmail.send", pkceVerified: true },
+    {
+      scope: "openid email https://www.googleapis.com/auth/gmail.send",
+      pkceVerified: true,
+      email: scenario.owner.email,
+    },
   ]);
   const row = connected.connections.find(
     (connection: { user_id: string }) =>
@@ -315,22 +327,57 @@ test("signed-in Connect Gmail exchanges PKCE, encrypts the row, then Disconnect 
     ]).toString(),
   ).toBe(scenario.gmailRefreshToken);
   expect(connected.schedules).toEqual(before.schedules);
-  // The page has just arrived from the OAuth redirect; retry the click until
-  // the confirmation dialog opens so a click before hydration is not lost.
+  // A schedule created now sends from the only connected account.
+  // Disconnecting that account pauses it and leaves every other row alone.
+  const created = await page.evaluate(async () => {
+    const response = await fetch("/api/schedules", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject: "Sent from the connected account",
+        body_text: "A reminder.",
+        to: ["recipient@example.test"],
+        rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0;BYSECOND=0",
+        timezone: "UTC",
+      }),
+    });
+    return {
+      status: response.status,
+      body: (await response.json()) as {
+        schedule: { id: string; status: string; gmail_connection_id: string };
+      },
+    };
+  });
+  expect(created.status, JSON.stringify(created.body)).toBe(201);
+  expect(created.body.schedule).toMatchObject({
+    status: "active",
+    gmail_connection_id: row.id,
+  });
+  await page.goto("/dashboard");
+  // Retry the click until the confirmation dialog opens so a click before
+  // hydration is not lost.
   const confirmDisconnect = page.getByRole("dialog", {
-    name: "Disconnect Gmail?",
+    name: `Disconnect ${scenario.owner.email}?`,
   });
   await expect(async () => {
     await page.getByRole("button", { name: "Disconnect", exact: true }).click();
     await expect(confirmDisconnect).toBeVisible({ timeout: 1000 });
   }).toPass();
+  await expect(confirmDisconnect).toContainText(
+    "1 schedule will pause until you choose another account for it.",
+  );
   await confirmDisconnect
-    .getByRole("button", { name: "Disconnect Gmail", exact: true })
+    .getByRole("button", { name: "Disconnect", exact: true })
     .click();
-  await expect(page).toHaveURL(/\/dashboard\?gmail=disconnected$/);
+  await expect(page).toHaveURL(
+    `http://127.0.0.1:3100/dashboard?gmail=disconnected&email=${encodeURIComponent(scenario.owner.email)}`,
+  );
   await expect(
-    page.getByRole("status").filter({ hasText: "Gmail is disconnected" }),
-  ).toContainText("All your schedules are paused");
+    page.getByRole("status").filter({ hasText: "Disconnected " }),
+  ).toContainText(
+    `Disconnected ${scenario.owner.email}. Its schedules are paused.`,
+  );
   await expect(
     page.getByRole("button", { name: "Connect Gmail", exact: true }),
   ).toBeVisible();
@@ -338,24 +385,18 @@ test("signed-in Connect Gmail exchanges PKCE, encrypts the row, then Disconnect 
   const disconnected = await snapshot();
   expect(disconnected.revokedTokens).toEqual([scenario.gmailRefreshToken]);
   expect(disconnected.connections).toEqual(before.connections);
-  expect(disconnected.schedules).toEqual(
-    before.schedules.map((schedule: { user_id: string; status: string }) =>
-      schedule.user_id === scenario.owner.id
-        ? { ...schedule, status: "paused" }
-        : schedule,
+  const createdId = created.body.schedule.id;
+  expect(
+    disconnected.schedules.find(
+      (schedule: { id: string }) => schedule.id === createdId,
     ),
-  );
+  ).toMatchObject({ status: "paused", gmail_connection_id: null });
+  // The owner's fixture rows and the other users' rows are untouched.
   expect(
     disconnected.schedules.filter(
-      (schedule: { user_id: string }) =>
-        schedule.user_id === scenario.foreignUserId,
+      (schedule: { id: string }) => schedule.id !== createdId,
     ),
-  ).toEqual(
-    before.schedules.filter(
-      (schedule: { user_id: string }) =>
-        schedule.user_id === scenario.foreignUserId,
-    ),
-  );
+  ).toEqual(before.schedules);
   expect(browserTokenRequests).toEqual([]);
   expect(codes).toHaveLength(2);
   await expect

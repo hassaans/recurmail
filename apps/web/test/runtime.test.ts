@@ -14,6 +14,26 @@ const config = {
   googleClientId: "fake-id",
   googleClientSecret: "fake-secret",
 };
+const connectionId = "11111111-1111-4111-8111-111111111111";
+const sendScope = "https://www.googleapis.com/auth/gmail.send";
+// The ID token Google returns with a grant, naming the account that granted
+// it. The signature is not checked (the token comes straight from Google over
+// TLS), so the segments only need the claims.
+function googleIdToken(email: string) {
+  const segment = (value: unknown) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  return [
+    segment({ alg: "RS256", typ: "JWT" }),
+    segment({
+      iss: "https://accounts.google.com",
+      aud: config.googleClientId,
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      email,
+      email_verified: true,
+    }),
+    "fake-signature",
+  ].join(".");
+}
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -40,11 +60,11 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
     vi.stubEnv("RECURMAIL_TEST_OAUTH_ORIGIN", "http://127.0.0.1:3101");
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          Response.json({ id: "owner", email: "owner@gmail.com" }),
-        ),
+      vi.fn(async (input: string | URL | Request) =>
+        new URL(String(input)).pathname === "/rest/v1/gmail_connections"
+          ? Response.json([])
+          : Response.json({ id: "owner", email: "owner@gmail.com" }),
+      ),
     );
     try {
       const response = await runRoute(
@@ -122,7 +142,7 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
     expect(await runtime.dashboard(request(cookie()))).toEqual({
       kind: "signed_in",
       user: { id: "owner", email: "owner@gmail.com" },
-      connection: null,
+      connections: [],
     });
     expect(
       new URL(fetcher.mock.calls[1][0]).searchParams.get("select"),
@@ -130,6 +150,7 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
   });
   it("does not pass any credential to the connected dashboard", async () => {
     const row = {
+      id: connectionId,
       user_id: "owner",
       google_email: "owner@gmail.com",
       is_workspace: false,
@@ -150,7 +171,7 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
     expect(JSON.stringify(state)).not.toContain("fake-access");
     expect(state).toMatchObject({
       kind: "signed_in",
-      connection: { status: "connected" },
+      connections: [{ id: connectionId, status: "connected" }],
     });
   });
   it("refreshes expired sessions through a route that can set HttpOnly cookies", async () => {
@@ -195,10 +216,15 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
   });
 
   it("runs sign-in, encrypted Gmail connection and disconnect through the native HTTP adapters", async () => {
-    let row: StoredConnection | null = null;
+    const rows: (StoredConnection & { id: string })[] = [];
     const schedules = [
-      { user_id: "owner", status: "active" },
-      { user_id: "other", status: "active" },
+      { user_id: "owner", gmail_connection_id: connectionId, status: "active" },
+      {
+        user_id: "owner",
+        gmail_connection_id: "other-connection",
+        status: "active",
+      },
+      { user_id: "other", gmail_connection_id: connectionId, status: "active" },
     ];
     const fetcher = vi.fn(
       async (input: string | URL | Request, init?: RequestInit) => {
@@ -222,7 +248,8 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
             return Response.json({ id_token: "fake-google-id-token" });
           return Response.json({
             refresh_token: "fake-gmail-refresh",
-            scope: "https://www.googleapis.com/auth/gmail.send",
+            scope: `openid email ${sendScope}`,
+            id_token: googleIdToken("owner@gmail.com"),
           });
         }
         if (
@@ -234,39 +261,69 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
           );
           return new Response(null, { status: 200 });
         }
-        expect(new Headers(init?.headers).get("apikey")).toBe("fake-secret");
-        expect(new Headers(init?.headers).get("Authorization")).toBeNull();
+        const headers = new Headers(init?.headers);
+        const select = url.searchParams.get("select");
+        // The account list is read with the user's own session so RLS
+        // applies; everything else is a service call without a user token.
+        if (
+          url.pathname === "/rest/v1/gmail_connections" &&
+          select === "id,user_id,google_email,is_workspace,status,connected_at"
+        ) {
+          expect(headers.get("apikey")).toBe("fake-publishable");
+          expect(headers.get("Authorization")).toBe("Bearer fake-access");
+          expect(url.searchParams.get("user_id")).toBe("eq.owner");
+          return Response.json(
+            rows.map(({ encrypted_refresh_token: _token, ...row }) => row),
+          );
+        }
+        expect(headers.get("apikey")).toBe("fake-secret");
+        expect(headers.get("Authorization")).toBeNull();
         if (url.pathname === "/rest/v1/gmail_connections") {
           if (init?.method === "POST") {
-            row = JSON.parse(String(init.body));
+            expect(url.search).toBe("");
+            const row = JSON.parse(String(init.body));
             expect(row).toMatchObject({
               user_id: "owner",
               google_email: "owner@gmail.com",
+              is_workspace: false,
               status: "connected",
             });
+            rows.push({ ...row, id: connectionId });
             return new Response(null, { status: 204 });
           }
           expect(url.searchParams.get("user_id")).toBe("eq.owner");
           if (init?.method === "DELETE") {
-            row = null;
+            expect(url.searchParams.get("id")).toBe(`eq.${connectionId}`);
+            rows.splice(0, rows.length);
             return new Response(null, { status: 204 });
           }
-          expect(url.searchParams.get("select")).toBe(
-            "encrypted_refresh_token",
-          );
+          if (select === "id,google_email")
+            return Response.json(
+              rows.map(({ id, google_email }) => ({ id, google_email })),
+            );
+          expect(select).toBe("google_email,encrypted_refresh_token");
+          expect(url.searchParams.get("id")).toBe(`eq.${connectionId}`);
           return Response.json(
-            row
-              ? [{ encrypted_refresh_token: row.encrypted_refresh_token }]
-              : [],
+            rows.map(({ google_email, encrypted_refresh_token }) => ({
+              google_email,
+              encrypted_refresh_token,
+            })),
           );
         }
         if (url.pathname === "/rest/v1/schedules") {
           expect(url.searchParams.get("user_id")).toBe("eq.owner");
+          expect(url.searchParams.get("gmail_connection_id")).toBe(
+            `eq.${connectionId}`,
+          );
           expect(JSON.parse(String(init?.body))).toMatchObject({
             status: "paused",
           });
           for (const schedule of schedules)
-            if (schedule.user_id === "owner") schedule.status = "paused";
+            if (
+              schedule.user_id === "owner" &&
+              schedule.gmail_connection_id === connectionId
+            )
+              schedule.status = "paused";
           return new Response(null, { status: 204 });
         }
         throw new Error("Unexpected fake HTTP request");
@@ -325,32 +382,45 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
         }),
       );
       expect(connected.headers.get("location")).toBe(
-        `${config.origin}/dashboard?gmail=connected`,
+        `${config.origin}/dashboard?gmail=connected&email=owner%40gmail.com`,
       );
-      const stored = row as StoredConnection | null;
+      expect(rows).toHaveLength(1);
       expect(
         decryptRefreshToken(
-          stored?.encrypted_refresh_token ?? "",
+          rows[0]?.encrypted_refresh_token ?? "",
           config.key,
           "owner",
         ),
       ).toBe("fake-gmail-refresh");
-      expect(JSON.stringify(stored)).not.toContain("fake-gmail-refresh");
+      expect(JSON.stringify(rows)).not.toContain("fake-gmail-refresh");
       const refreshed = await runRoute("refresh", request(session));
       expect(refreshed.headers.get("location")).toBe(
         `${config.origin}/dashboard`,
       );
       const disconnected = await runRoute(
         "disconnect",
-        post("/api/gmail/disconnect"),
+        post(`/api/gmail/disconnect?id=${connectionId}`),
       );
       expect(disconnected.headers.get("location")).toBe(
-        `${config.origin}/dashboard?gmail=disconnected`,
+        `${config.origin}/dashboard?gmail=disconnected&email=owner%40gmail.com`,
       );
-      expect(row).toBeNull();
+      expect(rows).toEqual([]);
       expect(schedules).toEqual([
-        { user_id: "owner", status: "paused" },
-        { user_id: "other", status: "active" },
+        {
+          user_id: "owner",
+          gmail_connection_id: connectionId,
+          status: "paused",
+        },
+        {
+          user_id: "owner",
+          gmail_connection_id: "other-connection",
+          status: "active",
+        },
+        {
+          user_id: "other",
+          gmail_connection_id: connectionId,
+          status: "active",
+        },
       ]);
       const unsigned = await runRoute(
         "connect",

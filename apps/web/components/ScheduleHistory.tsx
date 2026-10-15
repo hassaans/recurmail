@@ -1,9 +1,5 @@
-import {
-  type ConnectionStatus,
-  type FinishedInfo,
-  scheduleState,
-} from "../lib/schedule-state";
-import { recipientSummary } from "../lib/schedule-summary";
+import { type FinishedInfo, scheduleState } from "../lib/schedule-state";
+import { recipientSummary, type SenderAccount } from "../lib/schedule-summary";
 import {
   describeCadence,
   formatScheduleTime,
@@ -18,7 +14,8 @@ import SchedulePauseButton from "./SchedulePauseButton";
 type ScheduleHistoryProps = {
   schedule: ScheduleRow;
   history: SendHistoryRow[];
-  connectionStatus: ConnectionStatus;
+  /** Every Gmail account the user has connected. */
+  accounts: SenderAccount[];
   /** Set when the paused schedule's rule has run out; derived by the page. */
   finished?: FinishedInfo | null;
 };
@@ -46,7 +43,7 @@ export function reasonFor(entry: SendHistoryRow): string | null {
   }
   if (entry.status === "failed") {
     return entry.error_code === "invalid_grant"
-      ? "Gmail permission needs renewing. Reconnect Gmail to resume sending."
+      ? "Gmail permission needs renewing. Reconnect the sending account to resume sending."
       : "Gmail could not send this email. Check your connection and try again.";
   }
   if (entry.status === "skipped")
@@ -59,14 +56,18 @@ export function reasonFor(entry: SendHistoryRow): string | null {
 export default function ScheduleHistory({
   schedule,
   history,
-  connectionStatus,
+  accounts,
   finished = null,
 }: ScheduleHistoryProps) {
   const isFinished = schedule.status === "paused" && finished !== null;
+  const sender =
+    accounts.find((account) => account.id === schedule.gmail_connection_id) ??
+    null;
   const state = scheduleState(
     schedule.status,
-    connectionStatus,
+    sender?.status ?? "none",
     isFinished ? finished : null,
+    sender?.email ?? null,
   );
   const recipients = recipientSummary([
     ...schedule.to,
@@ -74,7 +75,14 @@ export default function ScheduleHistory({
     ...schedule.bcc,
   ]);
   const zone = zoneLabel(schedule.timezone, schedule.next_send_at);
-  const canEdit = connectionStatus === "connected";
+  const canEdit = accounts.some((account) => account.status === "connected");
+  const editPath = `/schedules/${encodeURIComponent(schedule.id)}/edit`;
+  // A schedule with no sender, or whose sender cannot send right now, has
+  // nothing to resume: the editor or the accounts list is the way forward.
+  const canToggle =
+    !isFinished &&
+    sender !== null &&
+    (schedule.status !== "paused" || sender.status === "connected");
   return (
     <>
       <a className={styles.back} href="/dashboard">
@@ -93,24 +101,32 @@ export default function ScheduleHistory({
             </div>
           </div>
           <div className={styles.headerActions}>
-            {canEdit ? (
+            {canEdit && !sender ? (
+              <a className={controls.primary} href={editPath}>
+                Choose sender
+              </a>
+            ) : canEdit ? (
               <a
                 className={isFinished ? controls.primary : controls.secondary}
-                href={`/schedules/${encodeURIComponent(schedule.id)}/edit`}
+                href={editPath}
               >
                 {isFinished ? "Edit to restart" : "Edit schedule"}
               </a>
             ) : null}
-            {isFinished ? null : (
+            {canToggle ? (
               <SchedulePauseButton
                 scheduleId={schedule.id}
                 subject={schedule.subject}
                 status={schedule.status}
               />
-            )}
+            ) : null}
           </div>
         </div>
         <dl className={styles.facts}>
+          <div>
+            <dt>From</dt>
+            <dd>{sender ? sender.email : "No sender"}</dd>
+          </div>
           <div>
             <dt>Repeats</dt>
             <dd>

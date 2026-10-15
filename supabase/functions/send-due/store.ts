@@ -89,6 +89,7 @@ export function createStore(
       await rpcVoid("mark_gmail_reconnect_needed", {
         p_schedule_id: input.scheduleId,
         p_user_id: input.userId,
+        p_connection_id: input.connectionId,
         p_scheduled_for: input.scheduledFor,
         p_recipient: input.recipient,
         p_reconnect_url: input.reconnectUrl,

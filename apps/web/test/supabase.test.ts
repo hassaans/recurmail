@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createConnectionStore } from "../lib/connections";
+import {
+  ConnectionLimitError,
+  createConnectionStore,
+  MAX_GMAIL_CONNECTIONS,
+} from "../lib/connections";
 import { createSupabaseAdmin, createSupabaseAuth } from "../lib/supabase-auth";
 
 const config = { url: "https://db.test", publishableKey: "fake-publishable" };
@@ -124,31 +128,88 @@ describe("native Supabase Auth adapter", () => {
 });
 
 describe("connection persistence honors column grants and user isolation", () => {
-  it("reads only safe fields with the user session and filters the owner", async () => {
+  const service = {
+    apikey: "fake-secret",
+    "Content-Type": "application/json",
+    Prefer: "return=minimal",
+  };
+  const personal = "11111111-1111-4111-8111-111111111111";
+  const work = "22222222-2222-4222-8222-222222222222";
+  const connection = {
+    user_id: "owner",
+    google_email: "owner@gmail.com",
+    is_workspace: false,
+    encrypted_refresh_token: "v1.encrypted",
+    status: "connected" as const,
+    connected_at: "2026-10-14",
+  };
+  function store(fetcher: typeof fetch) {
+    return createConnectionStore({
+      ...config,
+      secretKey: "fake-secret",
+      fetcher,
+    });
+  }
+
+  it("lists the user's accounts with their own session, oldest first, without any token", async () => {
     const fetcher = vi.fn().mockResolvedValue(
       Response.json([
         {
+          id: personal,
           user_id: "owner",
           google_email: "owner@gmail.com",
           is_workspace: false,
           status: "connected",
           connected_at: "2026-10-14",
+          encrypted_refresh_token: "leaked",
+        },
+        {
+          id: work,
+          user_id: "owner",
+          google_email: "work@company.test",
+          is_workspace: true,
+          status: "needs_reconnect",
+          connected_at: "2026-10-15",
+        },
+        {
+          id: "33333333-3333-4333-8333-333333333333",
+          user_id: "other",
+          google_email: "other@gmail.com",
+          is_workspace: false,
+          status: "connected",
+          connected_at: "2026-10-15",
         },
       ]),
     );
-    const store = createConnectionStore({
-      ...config,
-      secretKey: "fake-secret",
-      fetcher,
-    });
-    expect(await store.readPublic("owner", "fake-access")).toMatchObject({
-      google_email: "owner@gmail.com",
-    });
+    const rows = await store(fetcher).list("owner", "fake-access");
+    expect(rows).toEqual([
+      {
+        id: personal,
+        user_id: "owner",
+        google_email: "owner@gmail.com",
+        is_workspace: false,
+        status: "connected",
+        connected_at: "2026-10-14",
+      },
+      {
+        id: work,
+        user_id: "owner",
+        google_email: "work@company.test",
+        is_workspace: true,
+        status: "needs_reconnect",
+        connected_at: "2026-10-15",
+      },
+    ]);
+    expect(JSON.stringify(rows)).not.toContain("leaked");
     const [url, init] = fetcher.mock.calls[0];
+    expect(new URL(url).pathname).toBe("/rest/v1/gmail_connections");
     expect(new URL(url).searchParams.get("select")).toBe(
-      "user_id,google_email,is_workspace,status,connected_at",
+      "id,user_id,google_email,is_workspace,status,connected_at",
     );
     expect(new URL(url).searchParams.get("user_id")).toBe("eq.owner");
+    expect(new URL(url).searchParams.get("order")).toBe(
+      "connected_at.asc,id.asc",
+    );
     expect(init.headers).toEqual({
       apikey: "fake-publishable",
       Authorization: "Bearer fake-access",
@@ -158,85 +219,149 @@ describe("connection persistence honors column grants and user isolation", () =>
     expect(JSON.stringify(init)).not.toContain("fake-secret");
   });
 
-  it("writes credentials with service access and pauses before deleting only the owner's rows", async () => {
+  it("adds a new account with service access after checking the user's existing addresses", async () => {
     const fetcher = vi
       .fn()
-      .mockResolvedValue(new Response(null, { status: 204 }));
-    const store = createConnectionStore({
-      ...config,
-      secretKey: "fake-secret",
-      fetcher,
-    });
-    await store.save({
-      user_id: "owner",
+      .mockResolvedValueOnce(
+        Response.json([{ id: work, google_email: "work@company.test" }]),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await store(fetcher).save(connection);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const [lookupUrl, lookup] = fetcher.mock.calls[0];
+    expect(lookup.method).toBe("GET");
+    expect(new URL(lookupUrl).searchParams.get("user_id")).toBe("eq.owner");
+    expect(new URL(lookupUrl).searchParams.get("select")).toBe(
+      "id,google_email",
+    );
+    expect(lookup.headers).toEqual(service);
+    const [insertUrl, insert] = fetcher.mock.calls[1];
+    expect(new URL(insertUrl).pathname).toBe("/rest/v1/gmail_connections");
+    expect(new URL(insertUrl).search).toBe("");
+    expect(insert.method).toBe("POST");
+    expect(insert.headers).toEqual(service);
+    expect(JSON.parse(insert.body)).toEqual(connection);
+  });
+
+  it("updates the row that already holds the same address, ignoring case, instead of adding one", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json([
+          { id: work, google_email: "work@company.test" },
+          { id: personal, google_email: "Owner@GMAIL.com" },
+        ]),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await store(fetcher).save({ ...connection, status: "connected" });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const [url, init] = fetcher.mock.calls[1];
+    expect(init.method).toBe("PATCH");
+    expect(new URL(url).searchParams.get("id")).toBe("eq." + personal);
+    expect(new URL(url).searchParams.get("user_id")).toBe("eq.owner");
+    expect(init.headers).toEqual(service);
+    expect(JSON.parse(init.body)).toEqual({
       google_email: "owner@gmail.com",
       is_workspace: false,
       encrypted_refresh_token: "v1.encrypted",
       status: "connected",
       connected_at: "2026-10-14",
     });
-    expect(fetcher.mock.calls[0][1].headers).toEqual({
-      apikey: "fake-secret",
-      "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=minimal",
-    });
-    await store.pauseSchedules("owner");
-    await store.delete("owner");
-    expect(fetcher.mock.calls[1][1].headers).toEqual({
-      apikey: "fake-secret",
-      "Content-Type": "application/json",
-      Prefer: "return=minimal",
-    });
-    expect(new URL(fetcher.mock.calls[1][0]).pathname).toBe(
-      "/rest/v1/schedules",
-    );
-    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({
-      status: "paused",
-    });
-    expect(new URL(fetcher.mock.calls[2][0]).searchParams.get("user_id")).toBe(
-      "eq.owner",
-    );
-    expect(fetcher.mock.calls[2][1].method).toBe("DELETE");
-    expect(fetcher.mock.calls[2][1].headers).toEqual({
-      apikey: "fake-secret",
-      "Content-Type": "application/json",
-      Prefer: "return=minimal",
-    });
   });
 
-  it("reads a credential only server-side and reports persistence failures without payloads", async () => {
+  it("refuses to add an account past the cap without writing", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      Response.json(
+        Array.from({ length: MAX_GMAIL_CONNECTIONS }, (_, index) => ({
+          id: "44444444-4444-4444-8444-" + String(index).padStart(12, "0"),
+          google_email: "account" + index + "@company.test",
+        })),
+      ),
+    );
+    await expect(store(fetcher).save(connection)).rejects.toBeInstanceOf(
+      ConnectionLimitError,
+    );
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][1].method).toBe("GET");
+  });
+
+  it("pauses only that account's schedules before deleting it by id and owner", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const connections = store(fetcher);
+    await connections.pauseSchedules("owner", personal);
+    await connections.delete("owner", personal);
+    const [pauseUrl, pause] = fetcher.mock.calls[0];
+    expect(new URL(pauseUrl).pathname).toBe("/rest/v1/schedules");
+    expect(pause.method).toBe("PATCH");
+    expect(new URL(pauseUrl).searchParams.get("user_id")).toBe("eq.owner");
+    expect(new URL(pauseUrl).searchParams.get("gmail_connection_id")).toBe(
+      "eq." + personal,
+    );
+    expect(JSON.parse(pause.body)).toMatchObject({ status: "paused" });
+    expect(pause.headers).toEqual(service);
+    const [deleteUrl, remove] = fetcher.mock.calls[1];
+    expect(new URL(deleteUrl).pathname).toBe("/rest/v1/gmail_connections");
+    expect(remove.method).toBe("DELETE");
+    expect(new URL(deleteUrl).searchParams.get("id")).toBe("eq." + personal);
+    expect(new URL(deleteUrl).searchParams.get("user_id")).toBe("eq.owner");
+    expect(remove.headers).toEqual(service);
+  });
+
+  it("reads one credential and every token only server-side, and reports failures without payloads", async () => {
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce(
-        Response.json([{ encrypted_refresh_token: "v1.encrypted" }]),
+        Response.json([
+          {
+            google_email: "owner@gmail.com",
+            encrypted_refresh_token: "v1.encrypted",
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        Response.json([
+          { encrypted_refresh_token: "v1.encrypted" },
+          { encrypted_refresh_token: "v1.work" },
+        ]),
       )
       .mockResolvedValueOnce(
         Response.json({ message: "secret" }, { status: 500 }),
       );
-    const store = createConnectionStore({
-      ...config,
-      secretKey: "fake-secret",
-      fetcher,
+    const connections = store(fetcher);
+    expect(await connections.readCredential("owner", personal)).toEqual({
+      google_email: "owner@gmail.com",
+      encrypted_refresh_token: "v1.encrypted",
     });
-    expect(await store.readEncryptedToken("owner")).toBe("v1.encrypted");
-    expect(fetcher.mock.calls[0][1].headers).toEqual({
-      apikey: "fake-secret",
-      "Content-Type": "application/json",
-      Prefer: "return=minimal",
-    });
-    await expect(store.pauseSchedules("owner")).rejects.toThrow(
+    const [credentialUrl, credential] = fetcher.mock.calls[0];
+    expect(new URL(credentialUrl).searchParams.get("id")).toBe(
+      "eq." + personal,
+    );
+    expect(new URL(credentialUrl).searchParams.get("user_id")).toBe("eq.owner");
+    expect(new URL(credentialUrl).searchParams.get("select")).toBe(
+      "google_email,encrypted_refresh_token",
+    );
+    expect(credential.headers).toEqual(service);
+    expect(await connections.readEncryptedTokens("owner")).toEqual([
+      "v1.encrypted",
+      "v1.work",
+    ]);
+    expect(new URL(fetcher.mock.calls[1][0]).searchParams.get("select")).toBe(
+      "encrypted_refresh_token",
+    );
+    expect(fetcher.mock.calls[1][1].headers).toEqual(service);
+    await expect(connections.pauseSchedules("owner", personal)).rejects.toThrow(
       "Connection storage failed",
     );
   });
 
-  it("returns no credential when the owner's connection is absent", async () => {
+  it("returns no credential for a malformed id without a request, or for an absent row", async () => {
     const fetcher = vi.fn().mockResolvedValue(Response.json([]));
-    expect(
-      await createConnectionStore({
-        ...config,
-        secretKey: "fake-secret",
-        fetcher,
-      }).readEncryptedToken("owner"),
-    ).toBeNull();
+    const connections = store(fetcher);
+    expect(await connections.readCredential("owner", "not-a-uuid")).toBeNull();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await connections.readCredential("owner", personal)).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });

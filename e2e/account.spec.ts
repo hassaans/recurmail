@@ -11,6 +11,13 @@ test("account settings delete the signed-in user's account and related rows", as
     fakeSupabaseUrl + "/__test/scenarios/" + scenario.id + "/account-deletion",
   );
   expect(setup.status(), await setup.text()).toBe(200);
+  // A second account on the same user, so deletion has two tokens to revoke.
+  const second = await request.post(
+    fakeSupabaseUrl + "/__test/scenarios/" + scenario.id + "/second-account",
+  );
+  expect(second.status(), await second.text()).toBe(200);
+  const secondToken = ((await second.json()) as { refresh_token: string })
+    .refresh_token;
   await context.addCookies([
     testSessionCookie(
       scenario.owner.accessToken,
@@ -34,7 +41,10 @@ test("account settings delete the signed-in user's account and related rows", as
   expect(snapshotResponse.ok()).toBe(true);
   const snapshot = await snapshotResponse.json();
   expect(snapshot.deletedUserIds).toContain(scenario.owner.id);
-  expect(snapshot.revokedTokens).toEqual([scenario.gmailRefreshToken]);
+  expect(snapshot.revokedTokens).toHaveLength(2);
+  expect(snapshot.revokedTokens).toEqual(
+    expect.arrayContaining([scenario.gmailRefreshToken, secondToken]),
+  );
   expect(
     snapshot.connections.map((row: { user_id: string }) => row.user_id),
   ).not.toContain(scenario.owner.id);
