@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { DM_Sans, Plus_Jakarta_Sans } from "next/font/google";
 import type { ReactNode } from "react";
 import "./globals.css";
@@ -20,7 +20,13 @@ const dmSans = DM_Sans({
 export const metadata: Metadata = {
   metadataBase: new URL("https://recurmail.com"),
   title: "RecurMail",
-  description: "A workspace for the RecurMail web app.",
+  description: "Send recurring emails from your own Gmail.",
+  applicationName: "RecurMail",
+  manifest: "/manifest.webmanifest",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#6d3bef",
 };
 
 export default function RootLayout({
