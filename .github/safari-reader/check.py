@@ -13,12 +13,21 @@ import sys
 import pathlib
 
 from selenium import webdriver
+from selenium.webdriver.support.ui import WebDriverWait
 
 script_path, base_url, *expectations = sys.argv[1:]
 source = pathlib.Path(script_path).read_text(errors="replace")
 # Safari evaluates the source with bare global assignments allowed; drop the
 # strict-mode directive so those assignments behave the same in page scope.
 source = re.sub(r"[\"']use strict[\"'];?", "", source)
+
+# Safari's driver can hand control back before the new document has replaced
+# the old one, and probing then reads the previous page or an empty body. Wait
+# until the requested path is the loaded document before running the detector.
+LOADED = r"""
+return location.pathname === arguments[0] && document.readyState === 'complete'
+  && !!document.querySelector('main');
+"""
 
 PROBE = r"""
 const source = arguments[0];
@@ -40,6 +49,7 @@ try:
     for item in expectations:
         path, expected = item.split("=")
         driver.get(base_url.rstrip("/") + path)
+        WebDriverWait(driver, 30).until(lambda d: d.execute_script(LOADED, path))
         result = driver.execute_script(PROBE, source)
         print(f"{path}: {json.dumps(result)} (expected available={expected})", flush=True)
         if "error" in result:
