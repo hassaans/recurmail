@@ -399,6 +399,36 @@ describe("dashboard runtime uses validated identity and safe persistence", () =>
     },
   );
 
+  it("routes sign-out through the same-origin guard and clears the session", async () => {
+    setEnvironment();
+    try {
+      const forbidden = await runRoute(
+        "signout",
+        new Request(`${config.origin}/auth/signout`, {
+          method: "POST",
+          headers: { Origin: "https://attacker.test" },
+        }),
+      );
+      expect(forbidden.status).toBe(403);
+      expect(forbidden.headers.get("set-cookie")).toBeNull();
+      const signedOut = await runRoute(
+        "signout",
+        new Request(`${config.origin}/auth/signout`, {
+          method: "POST",
+          headers: { Origin: config.origin, Cookie: "rm_session=anything" },
+        }),
+      );
+      expect(signedOut.status).toBe(303);
+      expect(signedOut.headers.get("location")).toBe(`${config.origin}/`);
+      expect(signedOut.headers.get("set-cookie")).toContain(
+        "rm_session=; Path=/;",
+      );
+      expect(signedOut.headers.get("set-cookie")).toContain("Max-Age=0");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("allows local HTTP development without Secure cookies", async () => {
     setEnvironment();
     vi.stubEnv("APP_URL", "http://localhost:3000");

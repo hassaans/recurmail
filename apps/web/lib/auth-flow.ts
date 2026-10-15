@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { decryptRefreshToken, encryptRefreshToken } from "./crypto";
-import { cookieHeader, readCookie, redirectResponse } from "./http";
+import { cookieHeader, readCookie, redirectResponse, sameOrigin } from "./http";
 import type { Session } from "./supabase-auth";
 
 const stateCookie = "rm_auth_state";
@@ -185,6 +185,22 @@ export function createAuthHandlers(config: {
         );
         return response;
       }
+    },
+    // Sign-out only runs from a same-origin form post, like every other
+    // mutating route, so a cross-site page cannot log the user out. It clears
+    // the encrypted session cookie and lands on the homepage.
+    async signout(request: Request): Promise<Response> {
+      if (!sameOrigin(request, config.origin))
+        return new Response("Request origin is not allowed", {
+          status: 403,
+          headers: { "Cache-Control": "no-store" },
+        });
+      const response = redirectResponse(config.origin, "/");
+      response.headers.append(
+        "Set-Cookie",
+        cookieHeader(SESSION_COOKIE, "", config.origin, 0),
+      );
+      return response;
     },
   };
 }

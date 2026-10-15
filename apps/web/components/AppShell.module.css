@@ -1,0 +1,195 @@
+.page {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  background: var(--rm-bg);
+  color: var(--rm-ink);
+  font: 17px / 1.6 var(--rm-font-body);
+}
+.page *,
+.page *::before,
+.page *::after {
+  box-sizing: border-box;
+}
+.page
+  :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--rm-grape);
+  outline-offset: 3px;
+}
+.skip {
+  position: absolute;
+  top: 12px;
+  left: -9999px;
+  z-index: 10;
+  padding: 10px 16px;
+  border-radius: var(--rm-radius-pill);
+  background: var(--rm-paper);
+  color: var(--rm-ink);
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: var(--rm-shadow);
+}
+.skip:focus {
+  left: 16px;
+}
+
+.header {
+  background: var(--rm-paper);
+  border-bottom: 1px solid var(--rm-line);
+}
+.inner {
+  width: min(100% - 40px, 960px);
+  margin-inline: auto;
+}
+.headerInner {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 0;
+}
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  color: var(--rm-ink);
+  font: 700 24px / 1 var(--rm-font-display);
+  letter-spacing: -0.03em;
+  text-decoration: none;
+}
+.logo svg {
+  width: 32px;
+  height: 32px;
+}
+.nav {
+  display: flex;
+  gap: 4px;
+}
+.navLink {
+  padding: 8px 14px;
+  border-radius: var(--rm-radius-pill);
+  color: var(--rm-ink-2);
+  font: 600 15px / 1.2 var(--rm-font-body);
+  text-decoration: none;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
+}
+.navLink:hover {
+  background: var(--rm-bg-2);
+  color: var(--rm-ink);
+}
+.navLink[aria-current="page"] {
+  background: var(--rm-grape-soft);
+  color: var(--rm-grape-dark);
+}
+.account {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+.email {
+  max-width: 260px;
+  overflow: hidden;
+  color: var(--rm-muted);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account form {
+  margin: 0;
+}
+
+.main {
+  flex: 1;
+  width: min(100% - 40px, 960px);
+  margin-inline: auto;
+  padding: 36px 0 72px;
+}
+
+.footer {
+  border-top: 1px solid var(--rm-line);
+  color: var(--rm-muted);
+  font-size: 13px;
+}
+.footerInner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 24px;
+  padding: 20px 0 32px;
+}
+.footerInner nav {
+  display: flex;
+  gap: 18px;
+}
+.footerInner a {
+  color: var(--rm-ink-2);
+  font-weight: 600;
+  text-decoration: none;
+}
+.footerInner a:hover {
+  color: var(--rm-grape-dark);
+}
+.footerInner p {
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .headerInner {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 16px;
+    padding: 12px 0;
+  }
+  .logo {
+    font-size: 22px;
+  }
+  .nav {
+    width: 100%;
+    padding: 4px;
+    border: 1px solid var(--rm-line);
+    border-radius: var(--rm-radius-pill);
+    background: var(--rm-bg);
+  }
+  .navLink {
+    flex: 1;
+    text-align: center;
+  }
+  .account {
+    display: contents;
+  }
+  .email {
+    max-width: none;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    font-size: 13px;
+  }
+  /* Signed in: logo and Sign out share the first row, the navigation becomes
+     a full-width segmented bar, and the email sits under it. */
+  .signedIn {
+    grid-template-areas:
+      "logo signout"
+      "nav nav"
+      "email email";
+  }
+  .signedIn .logo {
+    grid-area: logo;
+  }
+  .signedIn .nav {
+    grid-area: nav;
+  }
+  .signedIn .account form {
+    grid-area: signout;
+    justify-self: end;
+  }
+  .signedIn .email {
+    grid-area: email;
+  }
+  .main {
+    padding: 24px 0 56px;
+  }
+}

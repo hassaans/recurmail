@@ -214,6 +214,7 @@ export async function runRoute(
     | "signin"
     | "authCallback"
     | "refresh"
+    | "signout"
     | "connect"
     | "callback"
     | "disconnect",
@@ -231,5 +232,6 @@ export async function runRoute(
   if (route === "signin") return runtime.auth.signin();
   if (route === "authCallback") return runtime.auth.callback(request);
   if (route === "refresh") return runtime.auth.refresh(request);
+  if (route === "signout") return runtime.auth.signout(request);
   return runtime[route](request);
 }

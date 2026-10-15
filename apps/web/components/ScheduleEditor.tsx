@@ -3,7 +3,6 @@
 import { nextOccurrence, presets, type Weekday } from "@recurmail/core";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import BrandMark from "./BrandMark";
 import styles from "./ScheduleEditor.module.css";
 
 type Repeat = "daily" | "weekdays" | "weekly" | "monthly" | "custom";
@@ -279,248 +278,226 @@ export default function ScheduleEditor({
   }
 
   return (
-    <div className={styles.page}>
-      <a className={styles.skip} href="#editor">
-        Skip to schedule editor
-      </a>
-      <header className={styles.header}>
-        <a
-          className={styles.logo}
-          href="/dashboard"
-          aria-label="RecurMail home"
-        >
-          <BrandMark />
-          RecurMail
-        </a>
-        <a href="/dashboard">Dashboard</a>
-      </header>
-      <main id="editor" className={styles.main}>
-        <p className={styles.eyebrow}>Set up a repeating email.</p>
-        <h1>{scheduleId ? "Edit schedule" : "New schedule"}</h1>
-        {error ? (
-          <p className={styles.error} role="alert">
-            {error}
-          </p>
-        ) : null}
-        {warning ? (
-          <p className={styles.warning} role="status">
-            {warning}
-          </p>
-        ) : null}
-        {loading ? (
-          <p role="status">Loading schedule…</p>
-        ) : (
-          <form className={styles.form} onSubmit={save}>
-            <section className={styles.card} aria-labelledby="message-title">
-              <h2 id="message-title">Email</h2>
-              <div className={styles.field}>
-                <label htmlFor="to">To</label>
-                <input
-                  id="to"
-                  value={to}
-                  onChange={(event) => setTo(event.target.value)}
-                  required
-                  placeholder="name@example.com"
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="cc">Cc</label>
-                <input
-                  id="cc"
-                  value={cc}
-                  onChange={(event) => setCc(event.target.value)}
-                  placeholder="Separate addresses with commas"
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="bcc">Bcc</label>
-                <input
-                  id="bcc"
-                  value={bcc}
-                  onChange={(event) => setBcc(event.target.value)}
-                  placeholder="Separate addresses with commas"
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="subject">Subject</label>
-                <input
-                  id="subject"
-                  value={subject}
-                  onChange={(event) => setSubject(event.target.value)}
-                  required
-                  maxLength={998}
-                />
-              </div>
-              <label htmlFor="message">Message</label>
-              <div
-                className={styles.toolbar}
-                role="toolbar"
-                aria-label="Message formatting"
-              >
-                <button
-                  type="button"
-                  aria-label="Bold"
-                  onClick={() => format("bold")}
-                >
-                  <strong>B</strong>
-                </button>
-                <button
-                  type="button"
-                  aria-label="Italic"
-                  onClick={() => format("italic")}
-                >
-                  <em>I</em>
-                </button>
-                <button
-                  type="button"
-                  aria-label="Insert link"
-                  onClick={() => format("createLink")}
-                >
-                  Link
-                </button>
-                <button
-                  type="button"
-                  aria-label="Bulleted list"
-                  onClick={() => format("insertUnorderedList")}
-                >
-                  • List
-                </button>
-                <button
-                  type="button"
-                  aria-label="Numbered list"
-                  onClick={() => format("insertOrderedList")}
-                >
-                  1. List
-                </button>
-              </div>
-              {/* biome-ignore lint/a11y/useSemanticElements: a contenteditable region provides rich text editing */}
-              <div
-                id="message"
-                ref={bodyRef}
-                className={styles.body}
-                role="textbox"
-                aria-label="Message"
-                aria-multiline="true"
-                tabIndex={0}
-                contentEditable
-                suppressContentEditableWarning
+    <div className={styles.main}>
+      <p className={styles.eyebrow}>Set up a repeating email.</p>
+      <h1>{scheduleId ? "Edit schedule" : "New schedule"}</h1>
+      {error ? (
+        <p className={styles.error} role="alert">
+          {error}
+        </p>
+      ) : null}
+      {warning ? (
+        <p className={styles.warning} role="status">
+          {warning}
+        </p>
+      ) : null}
+      {loading ? (
+        <p role="status">Loading schedule…</p>
+      ) : (
+        <form className={styles.form} onSubmit={save}>
+          <section className={styles.card} aria-labelledby="message-title">
+            <h2 id="message-title">Email</h2>
+            <div className={styles.field}>
+              <label htmlFor="to">To</label>
+              <input
+                id="to"
+                value={to}
+                onChange={(event) => setTo(event.target.value)}
+                required
+                placeholder="name@example.com"
               />
-            </section>
-            <section className={styles.card} aria-labelledby="repeat-title">
-              <h2 id="repeat-title">Repeat</h2>
-              <div className={styles.field}>
-                <label htmlFor="repeat">Repeat</label>
-                <select
-                  id="repeat"
-                  value={repeat}
-                  onChange={(event) => setRepeat(event.target.value as Repeat)}
-                >
-                  <option value="daily">Daily</option>
-                  <option value="weekdays">Weekdays</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                  <option value="custom">Custom RRULE</option>
-                </select>
-              </div>
-              {repeat === "weekly" ? (
-                <fieldset className={styles.days}>
-                  <legend>Days of the week</legend>
-                  {days.map((day) => (
-                    <label key={day.key}>
-                      <input
-                        type="checkbox"
-                        checked={selectedDays.includes(day.key)}
-                        onChange={(event) =>
-                          setSelectedDays((current) =>
-                            event.target.checked
-                              ? [...current, day.key]
-                              : current.filter((item) => item !== day.key),
-                          )
-                        }
-                      />
-                      {day.name}
-                    </label>
-                  ))}
-                </fieldset>
-              ) : null}
-              {repeat === "monthly" ? (
-                <div className={styles.field}>
-                  <label htmlFor="month-day">Date of month</label>
-                  <select
-                    id="month-day"
-                    value={monthDay}
-                    onChange={(event) =>
-                      setMonthDay(Number(event.target.value))
-                    }
-                  >
-                    {Array.from({ length: 31 }, (_, index) => index + 1).map(
-                      (day) => (
-                        <option key={day} value={day}>
-                          {day}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </div>
-              ) : null}
-              {repeat === "custom" ? (
-                <div className={styles.field}>
-                  <label htmlFor="custom-rule">Custom RRULE</label>
-                  <textarea
-                    id="custom-rule"
-                    value={customRule}
-                    onChange={(event) => setCustomRule(event.target.value)}
-                    rows={3}
-                  />
-                </div>
-              ) : null}
-              <div className={styles.field}>
-                <label htmlFor="time">Time</label>
-                <input
-                  id="time"
-                  type="time"
-                  value={time}
-                  onChange={(event) => setTime(event.target.value)}
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="timezone">IANA timezone</label>
-                <input
-                  id="timezone"
-                  value={timezone}
-                  onChange={(event) => setTimezone(event.target.value)}
-                />
-              </div>
-              <h3>Next 5 send times</h3>
-              <ol className={styles.preview} data-testid="next-send-preview">
-                {nextSends.length ? (
-                  nextSends.map((date) => (
-                    <li key={date.toISOString()}>
-                      {readableDate(date, timezone)}
-                    </li>
-                  ))
-                ) : (
-                  <li>Enter a valid repeat pattern and timezone to preview.</li>
-                )}
-              </ol>
-            </section>
-            <div className={styles.actions}>
-              <a href="/dashboard">Cancel</a>
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="cc">Cc</label>
+              <input
+                id="cc"
+                value={cc}
+                onChange={(event) => setCc(event.target.value)}
+                placeholder="Separate addresses with commas"
+              />
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="bcc">Bcc</label>
+              <input
+                id="bcc"
+                value={bcc}
+                onChange={(event) => setBcc(event.target.value)}
+                placeholder="Separate addresses with commas"
+              />
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="subject">Subject</label>
+              <input
+                id="subject"
+                value={subject}
+                onChange={(event) => setSubject(event.target.value)}
+                required
+                maxLength={998}
+              />
+            </div>
+            <label htmlFor="message">Message</label>
+            <div
+              className={styles.toolbar}
+              role="toolbar"
+              aria-label="Message formatting"
+            >
               <button
-                className={styles.save}
-                type="submit"
-                disabled={saving || loading}
+                type="button"
+                aria-label="Bold"
+                onClick={() => format("bold")}
               >
-                {saving ? "Saving…" : "Save schedule"}
+                <strong>B</strong>
+              </button>
+              <button
+                type="button"
+                aria-label="Italic"
+                onClick={() => format("italic")}
+              >
+                <em>I</em>
+              </button>
+              <button
+                type="button"
+                aria-label="Insert link"
+                onClick={() => format("createLink")}
+              >
+                Link
+              </button>
+              <button
+                type="button"
+                aria-label="Bulleted list"
+                onClick={() => format("insertUnorderedList")}
+              >
+                • List
+              </button>
+              <button
+                type="button"
+                aria-label="Numbered list"
+                onClick={() => format("insertOrderedList")}
+              >
+                1. List
               </button>
             </div>
-          </form>
-        )}
-      </main>
-      <footer className={styles.footer}>
-        Gmail is a trademark of Google LLC. RecurMail is not affiliated with
-        Google.
-      </footer>
+            {/* biome-ignore lint/a11y/useSemanticElements: a contenteditable region provides rich text editing */}
+            <div
+              id="message"
+              ref={bodyRef}
+              className={styles.body}
+              role="textbox"
+              aria-label="Message"
+              aria-multiline="true"
+              tabIndex={0}
+              contentEditable
+              suppressContentEditableWarning
+            />
+          </section>
+          <section className={styles.card} aria-labelledby="repeat-title">
+            <h2 id="repeat-title">Repeat</h2>
+            <div className={styles.field}>
+              <label htmlFor="repeat">Repeat</label>
+              <select
+                id="repeat"
+                value={repeat}
+                onChange={(event) => setRepeat(event.target.value as Repeat)}
+              >
+                <option value="daily">Daily</option>
+                <option value="weekdays">Weekdays</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="custom">Custom RRULE</option>
+              </select>
+            </div>
+            {repeat === "weekly" ? (
+              <fieldset className={styles.days}>
+                <legend>Days of the week</legend>
+                {days.map((day) => (
+                  <label key={day.key}>
+                    <input
+                      type="checkbox"
+                      checked={selectedDays.includes(day.key)}
+                      onChange={(event) =>
+                        setSelectedDays((current) =>
+                          event.target.checked
+                            ? [...current, day.key]
+                            : current.filter((item) => item !== day.key),
+                        )
+                      }
+                    />
+                    {day.name}
+                  </label>
+                ))}
+              </fieldset>
+            ) : null}
+            {repeat === "monthly" ? (
+              <div className={styles.field}>
+                <label htmlFor="month-day">Date of month</label>
+                <select
+                  id="month-day"
+                  value={monthDay}
+                  onChange={(event) => setMonthDay(Number(event.target.value))}
+                >
+                  {Array.from({ length: 31 }, (_, index) => index + 1).map(
+                    (day) => (
+                      <option key={day} value={day}>
+                        {day}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </div>
+            ) : null}
+            {repeat === "custom" ? (
+              <div className={styles.field}>
+                <label htmlFor="custom-rule">Custom RRULE</label>
+                <textarea
+                  id="custom-rule"
+                  value={customRule}
+                  onChange={(event) => setCustomRule(event.target.value)}
+                  rows={3}
+                />
+              </div>
+            ) : null}
+            <div className={styles.field}>
+              <label htmlFor="time">Time</label>
+              <input
+                id="time"
+                type="time"
+                value={time}
+                onChange={(event) => setTime(event.target.value)}
+              />
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="timezone">IANA timezone</label>
+              <input
+                id="timezone"
+                value={timezone}
+                onChange={(event) => setTimezone(event.target.value)}
+              />
+            </div>
+            <h3>Next 5 send times</h3>
+            <ol className={styles.preview} data-testid="next-send-preview">
+              {nextSends.length ? (
+                nextSends.map((date) => (
+                  <li key={date.toISOString()}>
+                    {readableDate(date, timezone)}
+                  </li>
+                ))
+              ) : (
+                <li>Enter a valid repeat pattern and timezone to preview.</li>
+              )}
+            </ol>
+          </section>
+          <div className={styles.actions}>
+            <a href="/dashboard">Cancel</a>
+            <button
+              className={styles.save}
+              type="submit"
+              disabled={saving || loading}
+            >
+              {saving ? "Saving…" : "Save schedule"}
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }
