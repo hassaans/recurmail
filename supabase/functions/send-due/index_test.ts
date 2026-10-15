@@ -316,6 +316,74 @@ Deno.test("fake Gmail HTTP E2E sends a MIME message and records sent send_log da
   }
 });
 
+Deno.test("successful send with 204 completion is counted as sent", async () => {
+  const { envelope, key } = await nodeEncryptedToken();
+  const requests: string[] = [];
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    requests.push(url.pathname);
+    if (url.pathname.endsWith("/rpc/reclaim_stale_sending")) {
+      return Response.json([]);
+    }
+    if (url.pathname.endsWith("/rpc/claim_due_schedules")) {
+      return Response.json([dueSchedule(envelope)]);
+    }
+    if (url.pathname.endsWith("/rpc/complete_due_schedule")) {
+      return new Response(null, { status: 204 });
+    }
+    if (url.pathname.endsWith("/rpc/get_admin_metrics")) {
+      return Response.json({
+        failed_last_hour: 0,
+        attempted_last_hour: 1,
+        failure_rate_last_hour: 0,
+      });
+    }
+    if (url.pathname.endsWith("/sender_heartbeats")) {
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`Unexpected store request: ${url.pathname}`);
+  };
+  const store = createStore("https://db.example.test", "service-key", fetcher);
+  const errors: unknown[][] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => errors.push(args);
+  try {
+    const result = await runSender(store, {
+      key,
+      clientId: "fake-client",
+      clientSecret: "fake-secret",
+      appUrl: "https://recurmail.example.test",
+      now: () => new Date("2026-10-14T17:00:01.000Z"),
+      send: async () => "accepted-message",
+    });
+
+    equal(
+      result,
+      {
+        claimed: 1,
+        sent: 1,
+        failed: 0,
+        deferred: 0,
+        notices_sent: 0,
+        notices_failed: 0,
+      },
+      "sender result after a void completion response",
+    );
+    assert(
+      requests.includes("/rest/v1/rpc/complete_due_schedule"),
+      "sender called the completion RPC",
+    );
+    assert(
+      !errors.some((args) =>
+        JSON.stringify(args).includes("post_send_store_failed"),
+      ),
+      "no post_send_store_failed log is emitted",
+    );
+  } finally {
+    console.error = originalError;
+  }
+});
+
 Deno.test("Gmail 429 defers one hour without pausing the schedule", async () => {
   const { envelope, key } = await nodeEncryptedToken();
   const fake = await fakeGoogleServer(429);
