@@ -13,7 +13,23 @@ const webPort = process.env.RECURMAIL_E2E_WEB_PORT?.trim() || "3100";
 const origin = `http://127.0.0.1:${fakePort}`;
 const appOrigin = `http://127.0.0.1:${webPort}`;
 const gmailScope = "https://www.googleapis.com/auth/gmail.send";
-const publicColumns = "user_id,google_email,is_workspace,status,connected_at";
+// Connecting asks for send permission plus the identity of the account that
+// grants it, so the app can record which account the user actually picked.
+const connectScope = `openid email ${gmailScope}`;
+const publicColumns =
+  "id,user_id,google_email,is_workspace,status,connected_at";
+const connectionColumns = [
+  "id",
+  "user_id",
+  "google_email",
+  "google_sub",
+  "is_workspace",
+  "status",
+  "connected_at",
+  "encrypted_refresh_token",
+];
+const connectionStatuses = ["connected", "needs_reconnect", "disconnected"];
+const maxConnections = 10;
 const scheduleColumns = [
   "id",
   "user_id",
@@ -28,6 +44,7 @@ const scheduleColumns = [
   "source",
   "status",
   "next_send_at",
+  "gmail_connection_id",
   "created_at",
   "updated_at",
 ];
@@ -45,7 +62,7 @@ function newUser(domain = "gmail.com") {
   };
 }
 
-function newSchedule(user, status = "active") {
+function newSchedule(user, status = "active", connectionId = null) {
   const now = new Date().toISOString();
   const next = new Date(Date.now() + 3600000);
   next.setUTCMilliseconds(0);
@@ -64,9 +81,62 @@ function newSchedule(user, status = "active") {
     source: "web",
     status,
     next_send_at: next.toISOString(),
+    gmail_connection_id: connectionId,
     created_at: now,
     updated_at: now,
   };
+}
+
+const isWorkspaceAddress = (email) => !/@(gmail|googlemail)\.com$/i.test(email);
+
+// Rows seeded without a Google account id stand for connections written
+// before the id was stored; the app fills the id in when they reconnect.
+function newConnection(
+  user,
+  email,
+  status,
+  encryptedRefreshToken,
+  googleSub = null,
+) {
+  return {
+    id: randomUUID(),
+    user_id: user.id,
+    google_email: email,
+    google_sub: googleSub,
+    is_workspace: isWorkspaceAddress(email),
+    status,
+    connected_at: "2026-10-14T09:00:00.000Z",
+    encrypted_refresh_token: encryptedRefreshToken,
+  };
+}
+
+// The fake Google account id for an address. A test that renames an account
+// passes the old id with the new address instead.
+const googleSubFor = (email) =>
+  createHash("sha256").update(email.toLowerCase()).digest("hex");
+
+// Mirrors the column check from migration 0007: null, or 1 to 255 characters.
+const validGoogleSub = (value) =>
+  value === null ||
+  value === undefined ||
+  (typeof value === "string" && value.length >= 1 && value.length <= 255);
+
+// Mirrors the two unique indexes from migration 0007: one row per address
+// (ignoring case) and one per Google account id, among a user's rows.
+function uniqueConflict(existing, row) {
+  if (
+    existing.some(
+      (candidate) =>
+        candidate.google_email.toLowerCase() === row.google_email.toLowerCase(),
+    )
+  )
+    return "gmail_connections_user_id_lower_email_key";
+  if (
+    typeof row.google_sub === "string" &&
+    existing.some((candidate) => candidate.google_sub === row.google_sub)
+  )
+    return "gmail_connections_user_id_google_sub_key";
+  return null;
 }
 
 function encryptedToken(token, userId) {
@@ -86,10 +156,57 @@ function encryptedToken(token, userId) {
   ].join(".");
 }
 
+// Google issues one refresh token per granting account. The owner's own
+// address gets a stable token so tests can name it before the grant happens.
+// One refresh token per Google account. The default id derives from the
+// address, so a plain grant for an address always gets that address's token.
+function gmailRefreshTokenFor(scenario, email, sub = googleSubFor(email)) {
+  const key = sub;
+  let token = scenario.gmailRefreshTokens.get(key);
+  if (!token) {
+    token = `fake-secret-gmail-refresh-${randomUUID()}`;
+    scenario.gmailRefreshTokens.set(key, token);
+  }
+  return token;
+}
+
+// The ID token Google returns alongside the grant, naming the account that
+// granted it. Only the claims matter: the app reads them without verifying
+// the signature because the token arrives straight from Google over TLS.
+function idTokenFor(email, sub = googleSubFor(email)) {
+  const segment = (value) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  return [
+    segment({ alg: "RS256", typ: "JWT" }),
+    segment({
+      iss: "https://accounts.google.com",
+      aud: "fake-google-client",
+      sub,
+      email,
+      email_verified: true,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    }),
+    "fake-signature",
+  ].join(".");
+}
+
 function newScenario() {
   const owner = newUser();
   const connected = newUser();
   const reconnect = newUser("workspace.test");
+  const connectedAccount = newConnection(
+    connected,
+    connected.email,
+    "connected",
+    "fixture-ciphertext",
+  );
+  const reconnectAccount = newConnection(
+    reconnect,
+    reconnect.email,
+    "needs_reconnect",
+    "fixture-ciphertext",
+  );
   const scenario = {
     id: randomUUID(),
     owner,
@@ -98,25 +215,25 @@ function newScenario() {
     foreignUserId: connected.id,
     gmailAccessToken: `fake-secret-gmail-access-${owner.id}`,
     gmailRefreshToken: `fake-secret-gmail-refresh-${owner.id}`,
-    connections: new Map(
-      [connected, reconnect].map((user) => [
-        user.id,
-        {
-          id: randomUUID(),
-          user_id: user.id,
-          google_email: user.email,
-          is_workspace: user === reconnect,
-          status: user === reconnect ? "needs_reconnect" : "connected",
-          connected_at: "2026-10-14",
-          encrypted_refresh_token: "fixture-ciphertext",
-        },
-      ]),
-    ),
+    // A second address the owner can grant from the account chooser.
+    workEmail: `${owner.id}@company.test`,
+    connectionIds: {
+      connected: connectedAccount.id,
+      reconnect: reconnectAccount.id,
+    },
+    connections: new Map([
+      [connectedAccount.id, connectedAccount],
+      [reconnectAccount.id, reconnectAccount],
+    ]),
+    // The owner connected an account once and removed it again, so their
+    // schedules are paused with no sender, as the database leaves them. The
+    // reconnect user's schedule is paused too: a failed send marks the
+    // account and pauses its schedules in the same step.
     schedules: [
-      newSchedule(owner),
       newSchedule(owner, "paused"),
-      newSchedule(connected),
-      newSchedule(reconnect),
+      newSchedule(owner, "paused"),
+      newSchedule(connected, "active", connectedAccount.id),
+      newSchedule(reconnect, "paused", reconnectAccount.id),
     ],
     sendLogs: [],
     revokedTokens: [],
@@ -128,14 +245,20 @@ function newScenario() {
     testSends: [],
     expiredGrant: false,
     gmailFails: false,
+    gmailRefreshTokens: new Map(),
+    nextGrant: null,
   };
+  scenario.gmailRefreshTokens.set(
+    googleSubFor(owner.email),
+    scenario.gmailRefreshToken,
+  );
   scenarios.set(scenario.id, scenario);
   return scenario;
 }
 
 /** Give the already-connected personal account a real, decryptable refresh token. */
 function connectForTestSend(scenario) {
-  const connection = scenario.connections.get(scenario.connected.id);
+  const connection = scenario.connections.get(scenario.connectionIds.connected);
   connection.encrypted_refresh_token = encryptedToken(
     scenario.gmailRefreshToken,
     scenario.connected.id,
@@ -179,6 +302,32 @@ function findUser(predicate) {
   return null;
 }
 
+function scenarioFromCookie(req) {
+  const id = req.headers.cookie
+    ?.split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith("fake_scenario="))
+    ?.slice("fake_scenario=".length);
+  return scenarios.get(id) ?? null;
+}
+
+function connectionsOf(scenario, userId) {
+  return [...scenario.connections.values()].filter(
+    (row) => row.user_id === userId,
+  );
+}
+
+// Mirrors the foreign key's "on delete set null" and the trigger that pauses
+// a schedule whose sender goes away.
+function removeConnection(scenario, id) {
+  scenario.connections.delete(id);
+  for (const schedule of scenario.schedules)
+    if (schedule.gmail_connection_id === id) {
+      schedule.gmail_connection_id = null;
+      if (schedule.status !== "paused") schedule.status = "paused";
+    }
+}
+
 async function body(req) {
   let raw = "";
   for await (const chunk of req) raw += chunk;
@@ -209,6 +358,8 @@ const server = createServer(async (req, res) => {
         testSends,
         expiredGrant,
         gmailFails,
+        gmailRefreshTokens,
+        nextGrant,
         ...scenario
       } = newScenario();
       return reply(201, scenario);
@@ -220,18 +371,64 @@ const server = createServer(async (req, res) => {
       const scenario = scenarios.get(id);
       if (!scenario) return reply(404, { error: "unknown test scenario" });
       if (setup === "account-deletion" && req.method === "POST") {
-        scenario.connections.set(scenario.owner.id, {
+        // The owner's own address, connected with a real encrypted token so
+        // a disconnect or account deletion can revoke it.
+        const row = newConnection(
+          scenario.owner,
+          scenario.owner.email,
+          "connected",
+          encryptedToken(scenario.gmailRefreshToken, scenario.owner.id),
+        );
+        scenario.connections.set(row.id, row);
+        return reply(200, {
           user_id: scenario.owner.id,
-          google_email: scenario.owner.email,
-          is_workspace: false,
-          status: "connected",
-          connected_at: "2026-10-14",
-          encrypted_refresh_token: encryptedToken(
-            scenario.gmailRefreshToken,
-            scenario.owner.id,
+          connection_id: row.id,
+        });
+      }
+      if (setup === "second-account" && req.method === "POST") {
+        // A second, work address on the owner's account with its own token.
+        const token = gmailRefreshTokenFor(scenario, scenario.workEmail);
+        const row = newConnection(
+          scenario.owner,
+          scenario.workEmail,
+          "connected",
+          encryptedToken(token, scenario.owner.id),
+          googleSubFor(scenario.workEmail),
+        );
+        row.connected_at = "2026-10-14T10:00:00.000Z";
+        scenario.connections.set(row.id, row);
+        return reply(200, {
+          user_id: scenario.owner.id,
+          connection_id: row.id,
+          google_sub: row.google_sub,
+          refresh_token: token,
+        });
+      }
+      if (setup === "grant" && req.method === "POST") {
+        // Which account the fake Google chooser picks on the next consent.
+        // An optional `sub` stands in for an account whose address changed
+        // (the old id with a new address) or for a different account that
+        // now owns an address (a new id with a known address).
+        const input = JSON.parse(await body(req));
+        if (
+          typeof input.email !== "string" ||
+          !input.email.includes("@") ||
+          (input.sub !== undefined && typeof input.sub !== "string")
+        )
+          return reply(400, { error: "invalid grant fixture" });
+        scenario.nextGrant = {
+          email: input.email,
+          sub: input.sub ?? googleSubFor(input.email),
+        };
+        return reply(200, {
+          email: input.email,
+          sub: scenario.nextGrant.sub,
+          refresh_token: gmailRefreshTokenFor(
+            scenario,
+            input.email,
+            scenario.nextGrant.sub,
           ),
         });
-        return reply(200, { user_id: scenario.owner.id });
       }
       if (setup === "revoke-failure" && req.method === "POST") {
         scenario.revokeFails = true;
@@ -273,6 +470,7 @@ const server = createServer(async (req, res) => {
         // after a fixed number of sends, one on an end date. Both keep the
         // stale next_send_at the cron leaves behind.
         const user = scenario.connected;
+        const connectionId = scenario.connectionIds.connected;
         const day = 86400000;
         const started = new Date(Date.now() - 3 * day);
         started.setUTCHours(9, 0, 0, 0);
@@ -280,14 +478,14 @@ const server = createServer(async (req, res) => {
           date.toISOString().replace(/[-:]/g, "").replace(".000", "");
         const lastSend = new Date(started.getTime() + 2 * day);
         const counted = {
-          ...newSchedule(user, "paused"),
+          ...newSchedule(user, "paused", connectionId),
           subject: "Quarterly reminder",
           rrule: `DTSTART:${stamp(started)}\nRRULE:FREQ=DAILY;COUNT=3`,
           next_send_at: lastSend.toISOString(),
         };
         const endDay = new Date(Date.now() - day).toISOString().slice(0, 10);
         const dated = {
-          ...newSchedule(user, "paused"),
+          ...newSchedule(user, "paused", connectionId),
           subject: "Launch countdown",
           rrule: `DTSTART:${stamp(started)}\nRRULE:FREQ=DAILY;UNTIL=${endDay.replace(/-/g, "")}T235959Z`,
           next_send_at: lastSend.toISOString(),
@@ -355,12 +553,7 @@ const server = createServer(async (req, res) => {
       url.pathname === "/o/oauth2/v2/auth" &&
       url.searchParams.get("scope") === "openid email profile"
     ) {
-      const id = req.headers.cookie
-        ?.split(";")
-        .map((cookie) => cookie.trim())
-        .find((cookie) => cookie.startsWith("fake_scenario="))
-        ?.slice("fake_scenario=".length);
-      const scenario = scenarios.get(id);
+      const scenario = scenarioFromCookie(req);
       const callback = new URL(url.searchParams.get("redirect_uri"));
       if (
         !scenario ||
@@ -418,17 +611,21 @@ const server = createServer(async (req, res) => {
       });
     }
     if (url.pathname === "/o/oauth2/v2/auth") {
-      const identity = findUser(
-        (user) => user.email === url.searchParams.get("login_hint"),
-      );
+      // Gmail consent. Adding an account shows Google's chooser, so there is
+      // no login_hint; reconnecting names the account and skips the chooser.
+      // The granting account is whatever the test queued, else the hinted
+      // one, else the signed-in owner's own address.
+      const scenario = scenarioFromCookie(req);
+      const hint = url.searchParams.get("login_hint");
       const callback = new URL(url.searchParams.get("redirect_uri"));
       if (
-        !identity ||
-        url.searchParams.get("scope") !== gmailScope ||
+        !scenario ||
+        url.searchParams.get("scope") !== connectScope ||
         url.searchParams.get("client_id") !== "fake-google-client" ||
         url.searchParams.get("response_type") !== "code" ||
         url.searchParams.get("access_type") !== "offline" ||
-        url.searchParams.get("prompt") !== "consent" ||
+        url.searchParams.get("prompt") !==
+          (hint ? "consent" : "consent select_account") ||
         url.searchParams.get("include_granted_scopes") !== "false" ||
         url.searchParams.get("code_challenge_method") !== "S256" ||
         !url.searchParams.get("code_challenge") ||
@@ -438,10 +635,15 @@ const server = createServer(async (req, res) => {
         callback.pathname !== "/api/gmail/callback"
       )
         return reply(400, { error: "unexpected Gmail authorization" });
+      const email = scenario.nextGrant?.email ?? hint ?? scenario.owner.email;
+      const sub = scenario.nextGrant?.sub ?? googleSubFor(email);
+      scenario.nextGrant = null;
       const code = `fake-secret-gmail-code-${randomUUID()}`;
       codes.set(code, {
         kind: "gmail",
-        ...identity,
+        scenario,
+        email,
+        sub,
         challenge: url.searchParams.get("code_challenge"),
         redirectUri: callback.toString(),
       });
@@ -452,9 +654,10 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/token" && req.method === "POST") {
       const data = new URLSearchParams(await body(req));
       if (data.get("grant_type") === "refresh_token") {
-        const scenario = [...scenarios.values()].find(
-          (candidate) =>
-            candidate.gmailRefreshToken === data.get("refresh_token"),
+        const scenario = [...scenarios.values()].find((candidate) =>
+          [...candidate.gmailRefreshTokens.values()].includes(
+            data.get("refresh_token"),
+          ),
         );
         if (
           !scenario ||
@@ -501,19 +704,28 @@ const server = createServer(async (req, res) => {
           .digest("base64url") !== grant.challenge
       )
         return reply(400, { error: "invalid_grant" });
-      grant.scenario.exchanges.push({ scope: gmailScope, pkceVerified: true });
+      grant.scenario.exchanges.push({
+        scope: connectScope,
+        pkceVerified: true,
+        email: grant.email,
+      });
       return reply(200, {
         access_token: grant.scenario.gmailAccessToken,
-        refresh_token: grant.scenario.gmailRefreshToken,
-        scope: gmailScope,
+        refresh_token: gmailRefreshTokenFor(
+          grant.scenario,
+          grant.email,
+          grant.sub,
+        ),
+        scope: connectScope,
         token_type: "Bearer",
         expires_in: 3600,
+        id_token: idTokenFor(grant.email, grant.sub),
       });
     }
     if (url.pathname === "/revoke" && req.method === "POST") {
       const token = new URLSearchParams(await body(req)).get("token");
-      const scenario = [...scenarios.values()].find(
-        (candidate) => candidate.gmailRefreshToken === token,
+      const scenario = [...scenarios.values()].find((candidate) =>
+        [...candidate.gmailRefreshTokens.values()].includes(token),
       );
       if (!scenario) return reply(400, { error: "invalid_token" });
       if (scenario.revokeFails)
@@ -562,7 +774,8 @@ const server = createServer(async (req, res) => {
       const target = findUser((candidate) => candidate.id === userId);
       if (!target) return reply(404, { error: "unknown user" });
       target.scenario.deletedUserIds.add(userId);
-      target.scenario.connections.delete(userId);
+      for (const row of connectionsOf(target.scenario, userId))
+        target.scenario.connections.delete(row.id);
       target.scenario.schedules = target.scenario.schedules.filter(
         (schedule) => schedule.user_id !== userId,
       );
@@ -612,6 +825,17 @@ const server = createServer(async (req, res) => {
             row[column],
           ]),
         );
+      // The composite foreign key: a sender must be one of the caller's own
+      // connections. The check constraint: only a paused schedule may have
+      // no sender.
+      const ownsSender = (connectionId) =>
+        connectionId === null ||
+        connectionId === undefined ||
+        connectionsOf(identity.scenario, identity.user.id).some(
+          (row) => row.id === connectionId,
+        );
+      const senderRequired = (row) =>
+        row.status !== "paused" && !row.gmail_connection_id;
       const representation = req.headers.prefer
         ?.split(",")
         .some((value) => value.trim() === "return=representation");
@@ -626,11 +850,15 @@ const server = createServer(async (req, res) => {
           )
         )
           return reply(400, { error: "invalid schedule row" });
+        if (!ownsSender(data.gmail_connection_id))
+          return reply(409, { error: "schedules_gmail_connection_id_fkey" });
         const row = {
           ...newSchedule(identity.user, "paused"),
           ...data,
           id: randomUUID(),
         };
+        if (senderRequired(row))
+          return reply(400, { error: "schedules_sender_required_check" });
         identity.scenario.schedules.push(row);
         return reply(201, representation ? [project(row)] : undefined);
       }
@@ -665,6 +893,10 @@ const server = createServer(async (req, res) => {
           )
         )
           return reply(403, { error: "immutable schedule column" });
+        if (!ownsSender(data.gmail_connection_id))
+          return reply(409, { error: "schedules_gmail_connection_id_fkey" });
+        if (rows.some((row) => senderRequired({ ...row, ...data })))
+          return reply(400, { error: "schedules_sender_required_check" });
         for (const row of rows) Object.assign(row, data);
         return reply(
           representation ? 200 : 204,
@@ -691,19 +923,23 @@ const server = createServer(async (req, res) => {
         return reply(401, { error: "unauthorized" });
       if (
         url.searchParams.get("user_id") !== `eq.${identity.user.id}` ||
-        url.searchParams.get("select") !== publicColumns
+        url.searchParams.get("select") !== publicColumns ||
+        url.searchParams.get("order") !== "connected_at.asc,id.asc"
       )
         return reply(403, { error: "column grants" });
-      const row = identity.scenario.connections.get(identity.user.id);
       return reply(
         200,
-        row
-          ? [
-              Object.fromEntries(
-                publicColumns.split(",").map((column) => [column, row[column]]),
-              ),
-            ]
-          : [],
+        connectionsOf(identity.scenario, identity.user.id)
+          .sort(
+            (a, b) =>
+              a.connected_at.localeCompare(b.connected_at) ||
+              a.id.localeCompare(b.id),
+          )
+          .map((row) =>
+            Object.fromEntries(
+              publicColumns.split(",").map((column) => [column, row[column]]),
+            ),
+          ),
       );
     }
     if (!service && url.pathname !== "/rest/v1/send_log")
@@ -712,12 +948,34 @@ const server = createServer(async (req, res) => {
       url.pathname === "/rest/v1/gmail_connections" &&
       req.method === "POST"
     ) {
+      // A plain insert; the database assigns the id, keeps one row per
+      // address and one per Google account id per user, and caps the number
+      // of accounts.
+      if (url.search !== "")
+        return reply(400, { error: "insert filters are unsupported" });
       const row = JSON.parse(await body(req));
       const target = findUser((user) => user.id === row.user_id);
-      if (!target || url.searchParams.get("on_conflict") !== "user_id")
-        return reply(400, { error: "invalid owner" });
-      target.scenario.connections.set(row.user_id, row);
-      return reply(204);
+      if (
+        !target ||
+        Object.keys(row).some(
+          (field) => field === "id" || !connectionColumns.includes(field),
+        ) ||
+        typeof row.google_email !== "string" ||
+        !validGoogleSub(row.google_sub) ||
+        typeof row.is_workspace !== "boolean" ||
+        !connectionStatuses.includes(row.status) ||
+        typeof row.connected_at !== "string" ||
+        typeof row.encrypted_refresh_token !== "string"
+      )
+        return reply(400, { error: "invalid connection row" });
+      const mine = connectionsOf(target.scenario, target.user.id);
+      const conflict = uniqueConflict(mine, row);
+      if (conflict) return reply(409, { error: conflict });
+      if (mine.length >= maxConnections)
+        return reply(400, { error: "gmail_connections_cap" });
+      const saved = { id: randomUUID(), google_sub: null, ...row };
+      target.scenario.connections.set(saved.id, saved);
+      return reply(201, undefined);
     }
     if (url.pathname === "/rest/v1/rpc/claim_test_send") {
       // Mirrors public.claim_test_send from migration 0008: count the user's
@@ -749,20 +1007,26 @@ const server = createServer(async (req, res) => {
       return reply(200, { allowed: true, id });
     }
     if (url.pathname === "/rest/v1/rpc/mark_test_send_reconnect_needed") {
-      // Mirrors public.mark_test_send_reconnect_needed from migration 0009:
-      // the dead refresh token flips the connection to needs_reconnect and
-      // pauses the user's active schedules. No send_log row, no reconnect email.
+      // Mirrors public.mark_test_send_reconnect_needed from migration 0010:
+      // the dead refresh token flips that one connection to needs_reconnect
+      // and pauses the schedules sending from it. The user's other accounts
+      // and their schedules are untouched. No send_log row, no reconnect email.
       if (req.method !== "POST")
         return reply(405, { error: "unsupported reconnect method" });
       const args = JSON.parse(await body(req));
       const owner = findUser((user) => user.id === args.p_user_id);
-      if (!owner) return reply(400, { error: "invalid reconnect arguments" });
-      const connection = owner.scenario.connections.get(owner.user.id);
-      if (connection?.status === "connected")
+      if (!owner || typeof args.p_connection_id !== "string")
+        return reply(400, { error: "invalid reconnect arguments" });
+      const connection = owner.scenario.connections.get(args.p_connection_id);
+      if (
+        connection?.user_id === owner.user.id &&
+        connection.status === "connected"
+      )
         connection.status = "needs_reconnect";
       for (const schedule of owner.scenario.schedules)
         if (
           schedule.user_id === owner.user.id &&
+          schedule.gmail_connection_id === args.p_connection_id &&
           (schedule.status === "active" || schedule.status === "sending")
         )
           schedule.status = "paused";
@@ -792,42 +1056,82 @@ const server = createServer(async (req, res) => {
     );
     if (!target) return reply(400, { error: "invalid owner filter" });
     if (url.pathname === "/rest/v1/gmail_connections") {
+      const idFilter = url.searchParams.get("id");
+      const statusFilter = url.searchParams.get("status");
       if (
-        req.method === "GET" &&
-        url.searchParams.get("select") ===
-          "id,google_email,is_workspace,status,encrypted_refresh_token"
-      ) {
-        const idFilter = url.searchParams.get("id");
-        if (idFilter !== null && !idFilter.startsWith("eq."))
-          return reply(400, { error: "unsupported connection filter" });
-        const row = target.scenario.connections.get(target.user.id);
-        const rows =
-          row && (idFilter === null || `eq.${row.id}` === idFilter)
-            ? [row]
-            : [];
+        (idFilter !== null && !idFilter.startsWith("eq.")) ||
+        (statusFilter !== null && !statusFilter.startsWith("eq."))
+      )
+        return reply(400, { error: "unsupported connection filter" });
+      let rows = connectionsOf(target.scenario, target.user.id).filter(
+        (row) =>
+          (idFilter === null || `eq.${row.id}` === idFilter) &&
+          (statusFilter === null || `eq.${row.status}` === statusFilter),
+      );
+      if (req.method === "GET") {
+        // The default test sender is the oldest connected account.
+        const order = url.searchParams.get("order");
+        if (order !== null && order !== "connected_at.asc,id.asc")
+          return reply(400, { error: "unsupported connection order" });
+        if (order !== null)
+          rows = [...rows].sort(
+            (a, b) =>
+              a.connected_at.localeCompare(b.connected_at) ||
+              a.id.localeCompare(b.id),
+          );
+        const limit = url.searchParams.get("limit");
+        if (limit !== null && !/^[1-9]\d*$/.test(limit))
+          return reply(400, { error: "unsupported connection limit" });
+        if (limit !== null) rows = rows.slice(0, Number(limit));
+        const select = url.searchParams.get("select");
+        const projections = {
+          encrypted_refresh_token: idFilter === null,
+          "id,google_email,google_sub": idFilter === null,
+          "google_email,encrypted_refresh_token": idFilter !== null,
+          "id,google_email,is_workspace,status,encrypted_refresh_token": true,
+        };
+        if (!projections[select])
+          return reply(400, { error: "unsupported connection projection" });
         return reply(
           200,
-          rows.map((connection) => ({
-            id: connection.id,
-            google_email: connection.google_email,
-            is_workspace: connection.is_workspace,
-            status: connection.status,
-            encrypted_refresh_token: connection.encrypted_refresh_token,
-          })),
+          rows.map((row) =>
+            Object.fromEntries(
+              select.split(",").map((column) => [column, row[column]]),
+            ),
+          ),
         );
       }
-      if (
-        req.method === "GET" &&
-        url.searchParams.get("select") === "encrypted_refresh_token"
-      ) {
-        const row = target.scenario.connections.get(target.user.id);
-        return reply(
-          200,
-          row ? [{ encrypted_refresh_token: row.encrypted_refresh_token }] : [],
+      if (idFilter === null)
+        return reply(400, { error: "connection id filter required" });
+      if (req.method === "PATCH") {
+        const data = JSON.parse(await body(req));
+        if (
+          !data ||
+          Array.isArray(data) ||
+          Object.keys(data).some(
+            (field) =>
+              ["id", "user_id"].includes(field) ||
+              !connectionColumns.includes(field),
+          ) ||
+          (data.status !== undefined &&
+            !connectionStatuses.includes(data.status)) ||
+          (data.google_sub !== undefined && !validGoogleSub(data.google_sub))
+        )
+          return reply(400, { error: "invalid connection changes" });
+        // The unique indexes hold on update too: the new address or account
+        // id must not already be on another of the user's rows.
+        const others = connectionsOf(target.scenario, target.user.id).filter(
+          (candidate) => !rows.includes(candidate),
         );
+        for (const row of rows) {
+          const conflict = uniqueConflict(others, { ...row, ...data });
+          if (conflict) return reply(409, { error: conflict });
+        }
+        for (const row of rows) Object.assign(row, data);
+        return reply(204);
       }
       if (req.method === "DELETE") {
-        target.scenario.connections.delete(target.user.id);
+        for (const row of rows) removeConnection(target.scenario, row.id);
         return reply(204);
       }
     }
@@ -866,11 +1170,20 @@ const server = createServer(async (req, res) => {
       );
     }
     if (url.pathname === "/rest/v1/schedules" && req.method === "PATCH") {
+      // Disconnecting pauses only the schedules sending from that account.
       const data = JSON.parse(await body(req));
-      if (data.status !== "paused")
+      const connectionFilter = url.searchParams.get("gmail_connection_id");
+      if (data.status !== "paused" || !connectionFilter?.startsWith("eq."))
         return reply(400, { error: "unexpected schedule mutation" });
       for (const schedule of target.scenario.schedules)
-        if (schedule.user_id === target.user.id) schedule.status = data.status;
+        if (
+          schedule.user_id === target.user.id &&
+          `eq.${schedule.gmail_connection_id}` === connectionFilter
+        ) {
+          schedule.status = data.status;
+          if (typeof data.updated_at === "string")
+            schedule.updated_at = data.updated_at;
+        }
       return reply(204);
     }
     return reply(404, { error: "unsupported fake endpoint" });

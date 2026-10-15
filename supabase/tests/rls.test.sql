@@ -1,24 +1,24 @@
 create extension if not exists pgtap with schema extensions;
 
 begin;
-select plan(17);
+select plan(18);
 
 insert into auth.users (id, email, aud, role) values
   ('00000000-0000-4000-8000-000000000001', 'rls-a@example.test', 'authenticated', 'authenticated'),
   ('00000000-0000-4000-8000-000000000002', 'rls-b@example.test', 'authenticated', 'authenticated');
 
 insert into public.gmail_connections (
-  user_id, google_email, is_workspace, encrypted_refresh_token, status
+  id, user_id, google_email, is_workspace, encrypted_refresh_token, status
 ) values
-  ('00000000-0000-4000-8000-000000000001', 'a@gmail.com', false, 'ciphertext-a', 'connected'),
-  ('00000000-0000-4000-8000-000000000002', 'b@gmail.com', false, 'ciphertext-b', 'connected');
+  ('40000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'a@gmail.com', false, 'ciphertext-a', 'connected'),
+  ('40000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000002', 'b@gmail.com', false, 'ciphertext-b', 'connected');
 
 insert into public.schedules (
-  id, user_id, subject, body_text, "to", rrule, timezone,
+  id, user_id, gmail_connection_id, subject, body_text, "to", rrule, timezone,
   next_send_at, status, source
 ) values
-  ('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'A schedule', 'A body', array['a@example.test'], 'FREQ=DAILY', 'UTC', now(), 'active', 'web'),
-  ('10000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000002', 'B schedule', 'B body', array['b@example.test'], 'FREQ=DAILY', 'UTC', now(), 'active', 'web');
+  ('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', 'A schedule', 'A body', array['a@example.test'], 'FREQ=DAILY', 'UTC', now(), 'active', 'web'),
+  ('10000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000002', '40000000-0000-4000-8000-000000000002', 'B schedule', 'B body', array['b@example.test'], 'FREQ=DAILY', 'UTC', now(), 'active', 'web');
 
 insert into public.reconnect_email_outbox (user_id, recipient, reconnect_url)
 values ('00000000-0000-4000-8000-000000000002', 'b@example.test', 'https://app.test/reconnect');
@@ -50,9 +50,14 @@ select is((
     and column_name in ('subject', 'body', 'body_text', 'body_html', 'recipient', 'to', 'cc', 'bcc')
 ), 0::bigint, 'send_log has no subject, body, or recipient columns');
 select throws_ok(
-  $$insert into public.schedules (user_id, subject, body_text, "to", rrule, timezone, next_send_at, status, source)
-    values ('00000000-0000-4000-8000-000000000002', 'forbidden', 'body', array['b@example.test'], 'FREQ=DAILY', 'UTC', now(), 'active', 'web')$$,
+  $$insert into public.schedules (user_id, gmail_connection_id, subject, body_text, "to", rrule, timezone, next_send_at, status, source)
+    values ('00000000-0000-4000-8000-000000000002', '40000000-0000-4000-8000-000000000002', 'forbidden', 'body', array['b@example.test'], 'FREQ=DAILY', 'UTC', now(), 'active', 'web')$$,
   '42501', null, 'user A cannot insert a schedule owned by user B'
+);
+select throws_ok(
+  $$insert into public.schedules (user_id, gmail_connection_id, subject, body_text, "to", rrule, timezone, next_send_at, status, source)
+    values ('00000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000002', 'forbidden sender', 'body', array['a@example.test'], 'FREQ=DAILY', 'UTC', now(), 'active', 'web')$$,
+  '23503', null, 'user A cannot send a schedule from user B''s Gmail connection'
 );
 select throws_ok(
   $$insert into public.gmail_connections (user_id, google_email, encrypted_refresh_token)

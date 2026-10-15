@@ -4,6 +4,8 @@ import { useCallback, useState } from "react";
 import { countSchedules, scheduleState } from "../lib/schedule-state";
 import {
   type ScheduleSummary,
+  type SenderAccount,
+  senderStatus,
   summarizeSchedule,
 } from "../lib/schedule-summary";
 import {
@@ -19,7 +21,8 @@ import Toast, { type ToastMessage } from "./Toast";
 
 export type ScheduleListProps = {
   initialSchedules: ScheduleSummary[];
-  connectionStatus: "connected" | "needs_reconnect" | "disconnected";
+  /** Every Gmail account the user has connected. */
+  accounts: SenderAccount[];
   loadError?: boolean;
 };
 
@@ -40,6 +43,17 @@ const pillClass = {
   warn: controls.pillWarn,
 } as const;
 
+/** A failed request, carrying the server's own message when it sent one. */
+class RequestFailed extends Error {
+  constructor(
+    readonly status: number,
+    readonly serverMessage: string | null,
+    fallback: string,
+  ) {
+    super(serverMessage ?? fallback);
+  }
+}
+
 function Spinner() {
   return <span className={controls.spinner} aria-hidden="true" />;
 }
@@ -54,8 +68,13 @@ function isFinished(schedule: ScheduleSummary): boolean {
   return schedule.status === "paused" && schedule.finished !== null;
 }
 
+/** Paused, not finished, and sending from an account that can send now. */
 function resumable(schedule: ScheduleSummary): boolean {
-  return schedule.status === "paused" && !isFinished(schedule);
+  return (
+    schedule.status === "paused" &&
+    !isFinished(schedule) &&
+    schedule.sender?.status === "connected"
+  );
 }
 
 // The server renders the first list; this component owns pause, resume,
@@ -64,7 +83,7 @@ function resumable(schedule: ScheduleSummary): boolean {
 // outcome in a live region.
 export default function ScheduleList({
   initialSchedules,
-  connectionStatus,
+  accounts,
   loadError = false,
 }: ScheduleListProps) {
   const [schedules, setSchedules] = useState(initialSchedules);
@@ -77,13 +96,30 @@ export default function ScheduleList({
   const [bulk, setBulk] = useState<BulkAction | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const dismissToast = useCallback(() => setToast(null), []);
-  const canEdit = connectionStatus === "connected";
+  const canEdit = accounts.some((account) => account.status === "connected");
+  // With one account the sender goes without saying; with more, each card
+  // names the account it sends from.
+  const showSender = accounts.length > 1;
   const busy = pending !== null;
 
   async function request(path: string, method: "POST" | "DELETE") {
     const response = await fetch(path, { method, credentials: "same-origin" });
     if (!response.ok) {
-      throw new Error(`${method} ${path} failed with ${response.status}`);
+      let serverMessage: string | null = null;
+      try {
+        const body = (await response.json()) as {
+          error?: { message?: unknown };
+        };
+        if (typeof body.error?.message === "string")
+          serverMessage = body.error.message;
+      } catch (cause) {
+        console.error(cause);
+      }
+      throw new RequestFailed(
+        response.status,
+        serverMessage,
+        `${method} ${path} failed with ${response.status}`,
+      );
     }
     return response.status === 204
       ? null
@@ -100,6 +136,7 @@ export default function ScheduleList({
     return summarizeSchedule(
       row,
       row.status === "paused" ? (known?.finished ?? null) : null,
+      accounts,
     );
   }
 
@@ -144,11 +181,21 @@ export default function ScheduleList({
       });
     } catch (cause) {
       console.error(cause);
+      // A 400 carries the server's reason, such as the sender needing a
+      // reconnect; anything else is most likely the network.
+      const reason =
+        cause instanceof RequestFailed && cause.status === 400
+          ? cause.serverMessage
+          : null;
       setToast({
         tone: "error",
-        text: `“${schedule.subject}” could not be ${
-          action === "pause" ? "paused" : "resumed"
-        }. Check your connection and try again.`,
+        text: reason
+          ? `“${schedule.subject}” could not be ${
+              action === "pause" ? "paused" : "resumed"
+            }. ${reason}.`
+          : `“${schedule.subject}” could not be ${
+              action === "pause" ? "paused" : "resumed"
+            }. Check your connection and try again.`,
       });
     } finally {
       setPending(null);
@@ -332,14 +379,22 @@ export default function ScheduleList({
               const finished = isFinished(schedule);
               const state = scheduleState(
                 schedule.status,
-                connectionStatus,
+                senderStatus(schedule),
                 finished ? schedule.finished : null,
+                schedule.sender?.email ?? null,
               );
               const id = encodeURIComponent(schedule.id);
               const toggleAction =
                 schedule.status === "active" ? "pause" : "resume";
               const togglePending =
                 pending?.kind === toggleAction && pending.id === schedule.id;
+              // No sender, or a sender that cannot send right now, leaves
+              // nothing to resume: the editor is where the fix happens.
+              const noSender = schedule.sender === null;
+              const canToggle =
+                !finished &&
+                !noSender &&
+                (schedule.status !== "paused" || resumable(schedule));
               return (
                 <li className={styles.card} key={schedule.id}>
                   <div className={styles.strip}>
@@ -362,6 +417,9 @@ export default function ScheduleList({
                         schedule.next_send_at,
                       )}{" "}
                       · {schedule.recipients}
+                      {showSender && schedule.sender
+                        ? ` · From ${schedule.sender.email}`
+                        : null}
                     </p>
                     {state.note ? (
                       <p
@@ -385,7 +443,14 @@ export default function ScheduleList({
                       </dl>
                     )}
                     <div className={styles.actions}>
-                      {canEdit ? (
+                      {canEdit && noSender ? (
+                        <a
+                          className={`${controls.primary} ${controls.small}`}
+                          href={`/schedules/${id}/edit`}
+                        >
+                          Choose sender
+                        </a>
+                      ) : canEdit ? (
                         <a
                           className={`${
                             finished ? controls.primary : controls.secondary
@@ -401,7 +466,7 @@ export default function ScheduleList({
                       >
                         History
                       </a>
-                      {finished ? null : (
+                      {canToggle ? (
                         <button
                           className={`${
                             schedule.status === "paused"
@@ -425,7 +490,7 @@ export default function ScheduleList({
                             "Resume"
                           )}
                         </button>
-                      )}
+                      ) : null}
                       <span className={styles.spacer} />
                       <button
                         className={`${controls.dangerQuiet} ${controls.small}`}

@@ -50,7 +50,7 @@ interface FakeUser {
   accessToken: string;
   refreshToken: string;
 }
-interface Scenario {
+export interface Scenario {
   id: string;
   owner: FakeUser;
   connected: FakeUser;
@@ -58,6 +58,10 @@ interface Scenario {
   foreignUserId: string;
   gmailAccessToken: string;
   gmailRefreshToken: string;
+  /** A work address the owner can grant from Google's account chooser. */
+  workEmail: string;
+  /** The fixture connections of the connected and reconnect users. */
+  connectionIds: { connected: string; reconnect: string };
 }
 
 export const test = base.extend<{ scenario: Scenario }>({

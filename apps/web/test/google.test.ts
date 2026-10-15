@@ -3,24 +3,66 @@ import {
   createGoogleProvider,
   GmailSendError,
   GoogleTokenError,
+  grantedAccountFromIdToken,
 } from "../lib/google";
 
 afterEach(() => vi.unstubAllEnvs());
 
+const sendScope = "https://www.googleapis.com/auth/gmail.send";
+const connectScope = `openid email ${sendScope}`;
+const now = Date.parse("2026-10-15T12:00:00Z");
+
+function segment(value: unknown) {
+  return Buffer.from(JSON.stringify(value)).toString("base64url");
+}
+
+// An ID token as Google's token endpoint returns it: three base64url
+// segments. The token arrives over TLS straight from Google, so the signature
+// is not verified and any filler will do here.
+function idToken(claims: Record<string, unknown> = {}, clientId = "id") {
+  return `${segment({ alg: "RS256", typ: "JWT" })}.${segment({
+    iss: "https://accounts.google.com",
+    aud: clientId,
+    exp: Math.floor(now / 1000) + 3600,
+    sub: "google-owner-sub",
+    email: "owner@gmail.com",
+    email_verified: true,
+    ...claims,
+  })}.fake-signature`;
+}
+
+function grant(
+  claims: Record<string, unknown> = {},
+  clientId = "id",
+  body: Record<string, unknown> = {},
+) {
+  return {
+    refresh_token: "fake-refresh",
+    scope: connectScope,
+    id_token: idToken(claims, clientId),
+    ...body,
+  };
+}
+
+function provider(fetcher: typeof fetch, clientId = "id") {
+  return createGoogleProvider({
+    clientId,
+    clientSecret: "secret",
+    fetcher,
+    now: () => now,
+  });
+}
+
 describe("separate Gmail OAuth provider", () => {
   it("uses an explicit loopback OAuth endpoint only outside production", async () => {
     vi.stubEnv("NODE_ENV", "test");
-    const fetcher = vi.fn().mockResolvedValue(
-      Response.json({
-        refresh_token: "fake-refresh",
-        scope: "https://www.googleapis.com/auth/gmail.send",
-      }),
-    );
+    const fetcher = vi.fn().mockResolvedValue(Response.json(grant()));
     const google = createGoogleProvider({
       clientId: "id",
       clientSecret: "secret",
       testOAuthOrigin: "http://127.0.0.1:3101",
       fetcher,
+      now: () => now,
     });
     expect(
       new URL(
@@ -67,17 +109,13 @@ describe("separate Gmail OAuth provider", () => {
 
   it("ignores test OAuth injection in production even when the injected URL is invalid", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    const fetcher = vi.fn().mockResolvedValue(
-      Response.json({
-        refresh_token: "fake-refresh",
-        scope: "https://www.googleapis.com/auth/gmail.send",
-      }),
-    );
+    const fetcher = vi.fn().mockResolvedValue(Response.json(grant()));
     const google = createGoogleProvider({
       clientId: "id",
       clientSecret: "secret",
       testOAuthOrigin: "bad-url-fake-secret",
       fetcher,
+      now: () => now,
     });
     expect(
       new URL(
@@ -100,7 +138,8 @@ describe("separate Gmail OAuth provider", () => {
       "https://oauth2.googleapis.com/revoke",
     ]);
   });
-  it("requests exactly send permission for the signed-in account with offline consent", () => {
+
+  it("asks for send permission plus the granting account's identity, with the account chooser when adding", () => {
     const google = createGoogleProvider({
       clientId: "test-client",
       clientSecret: "test-secret",
@@ -109,20 +148,17 @@ describe("separate Gmail OAuth provider", () => {
       google.authorizationUrl({
         redirectUri: "https://app.test/api/gmail/callback",
         state: "nonce",
-        email: "owner@gmail.com",
         challenge: "pkce-challenge",
       }),
     );
     expect(url.origin + url.pathname).toBe(
       "https://accounts.google.com/o/oauth2/v2/auth",
     );
-    expect(url.searchParams.get("scope")).toBe(
-      "https://www.googleapis.com/auth/gmail.send",
-    );
+    expect(url.searchParams.get("scope")).toBe(connectScope);
     expect(url.searchParams.get("access_type")).toBe("offline");
-    expect(url.searchParams.get("prompt")).toBe("consent");
-    expect(url.searchParams.get("login_hint")).toBe("owner@gmail.com");
-    expect(url.searchParams.get("include_granted_scopes")).not.toBe("true");
+    expect(url.searchParams.get("prompt")).toBe("consent select_account");
+    expect(url.searchParams.has("login_hint")).toBe(false);
+    expect(url.searchParams.get("include_granted_scopes")).toBe("false");
     expect(url.searchParams.get("state")).toBe("nonce");
     expect(url.searchParams.get("response_type")).toBe("code");
     expect(url.searchParams.get("code_challenge")).toBe("pkce-challenge");
@@ -131,34 +167,47 @@ describe("separate Gmail OAuth provider", () => {
     expect(url.toString()).not.toContain("test-secret");
   });
 
-  it("exchanges the code in a server POST and revokes in a POST body", async () => {
-    const fetcher = vi
-      .fn()
-      .mockResolvedValueOnce(
-        Response.json({
-          refresh_token: "fake-refresh",
-          scope: "https://www.googleapis.com/auth/gmail.send",
-        }),
-      )
-      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+  it("pre-selects the account being reconnected instead of showing the chooser", () => {
     const google = createGoogleProvider({
       clientId: "test-client",
       clientSecret: "test-secret",
-      fetcher,
     });
+    const url = new URL(
+      google.authorizationUrl({
+        redirectUri: "https://app.test/api/gmail/callback",
+        state: "nonce",
+        email: "work@company.test",
+        challenge: "pkce-challenge",
+      }),
+    );
+    expect(url.searchParams.get("scope")).toBe(connectScope);
+    expect(url.searchParams.get("prompt")).toBe("consent");
+    expect(url.searchParams.get("login_hint")).toBe("work@company.test");
+    expect(url.searchParams.get("access_type")).toBe("offline");
+  });
+
+  it("exchanges the code in a server POST, returns the granted account and revokes in a POST body", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(grant({}, "test-client")))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const google = provider(fetcher, "test-client");
     expect(
       await google.exchangeCode(
         "fake-code",
         "https://app.test/api/gmail/callback",
         "fake-verifier",
       ),
-    ).toBe("fake-refresh");
+    ).toEqual({
+      refreshToken: "fake-refresh",
+      sub: "google-owner-sub",
+      email: "owner@gmail.com",
+      isWorkspace: false,
+    });
     const [url, init] = fetcher.mock.calls[0];
     expect(url).toBe("https://oauth2.googleapis.com/token");
     expect(init.method).toBe("POST");
-    expect(new URLSearchParams(init.body).get("client_secret")).toBe(
-      "test-secret",
-    );
+    expect(new URLSearchParams(init.body).get("client_secret")).toBe("secret");
     expect(new URLSearchParams(init.body).get("code")).toBe("fake-code");
     expect(new URLSearchParams(init.body).get("code_verifier")).toBe(
       "fake-verifier",
@@ -174,27 +223,109 @@ describe("separate Gmail OAuth provider", () => {
   });
 
   it.each([
-    { status: 400, body: { error: "fake-refresh" } },
-    {
-      status: 200,
-      body: { scope: "https://www.googleapis.com/auth/gmail.send" },
-    },
-    { status: 200, body: { refresh_token: "fake-refresh", scope: "openid" } },
-    {
-      status: 200,
-      body: {
-        refresh_token: "fake-refresh",
-        scope: "https://www.googleapis.com/auth/gmail.send openid",
-      },
-    },
+    ["work@company.test", true],
+    ["someone@GMAIL.COM", false],
+    ["someone@googlemail.com", false],
   ])(
-    "rejects unusable or broader grants without exposing provider payloads",
-    async ({ status, body }) => {
-      const google = createGoogleProvider({
-        clientId: "test-client",
-        clientSecret: "test-secret",
-        fetcher: vi.fn().mockResolvedValue(Response.json(body, { status })),
+    "takes the account from the ID token: %s is workspace=%s",
+    async (email, isWorkspace) => {
+      const google = provider(
+        vi.fn().mockResolvedValue(Response.json(grant({ email }))),
+      );
+      expect(
+        await google.exchangeCode("code", "https://app.test/cb", "verifier"),
+      ).toEqual({
+        refreshToken: "fake-refresh",
+        sub: "google-owner-sub",
+        email,
+        isWorkspace,
       });
+    },
+  );
+
+  it.each([
+    `email openid ${sendScope}`,
+    `${sendScope} openid email`,
+    `openid https://www.googleapis.com/auth/userinfo.email ${sendScope}`,
+    `${sendScope}   email  openid`,
+  ])("accepts the granted scopes in any order: %s", async (scope) => {
+    const google = provider(
+      vi.fn().mockResolvedValue(Response.json(grant({}, "id", { scope }))),
+    );
+    await expect(
+      google.exchangeCode("code", "https://app.test/cb", "verifier"),
+    ).resolves.toMatchObject({ email: "owner@gmail.com" });
+  });
+
+  it.each([
+    ["a provider error", { status: 400, body: { error: "fake-refresh" } }],
+    [
+      "no refresh token",
+      { status: 200, body: { scope: connectScope, id_token: idToken() } },
+    ],
+    [
+      "identity without send permission",
+      {
+        status: 200,
+        body: {
+          refresh_token: "fake-refresh",
+          scope: "openid email",
+          id_token: idToken(),
+        },
+      },
+    ],
+    [
+      "a broader grant",
+      {
+        status: 200,
+        body: grant({}, "id", {
+          scope: `${connectScope} https://www.googleapis.com/auth/gmail.readonly`,
+        }),
+      },
+    ],
+    [
+      "send permission without an ID token",
+      {
+        status: 200,
+        body: { refresh_token: "fake-refresh", scope: connectScope },
+      },
+    ],
+    [
+      "an ID token from another issuer",
+      { status: 200, body: grant({ iss: "https://attacker.test" }) },
+    ],
+    [
+      "an ID token for another client",
+      { status: 200, body: grant({ aud: "other-client" }) },
+    ],
+    [
+      "an expired ID token",
+      { status: 200, body: grant({ exp: Math.floor(now / 1000) - 1 }) },
+    ],
+    [
+      "an unverified address",
+      { status: 200, body: grant({ email_verified: false }) },
+    ],
+    ["a missing address", { status: 200, body: grant({ email: undefined }) }],
+    ["a missing subject", { status: 200, body: grant({ sub: undefined }) }],
+    ["an empty subject", { status: 200, body: grant({ sub: "" }) }],
+    [
+      "a malformed ID token",
+      { status: 200, body: grant({}, "id", { id_token: "not-a-jwt" }) },
+    ],
+    [
+      "an ID token whose payload is not JSON",
+      {
+        status: 200,
+        body: grant({}, "id", { id_token: "aGVhZGVy.!!!.c2ln" }),
+      },
+    ],
+  ])(
+    "rejects %s without exposing provider payloads",
+    async (_label, { status, body }) => {
+      const google = provider(
+        vi.fn().mockResolvedValue(Response.json(body, { status })),
+      );
       await expect(
         google.exchangeCode(
           "code",
@@ -314,6 +445,50 @@ describe("separate Gmail OAuth provider", () => {
     await expect(failure).rejects.toBeInstanceOf(GmailSendError);
     await expect(failure).rejects.toMatchObject({ status: 429 });
     await expect(failure).rejects.not.toThrow("fake-secret-detail");
+  });
+
+  it("reads the granting account out of an ID token with Google's other issuer form", () => {
+    expect(
+      grantedAccountFromIdToken(
+        idToken({ iss: "accounts.google.com", email: "team@company.test" }),
+        "id",
+        now,
+      ),
+    ).toEqual({
+      sub: "google-owner-sub",
+      email: "team@company.test",
+      isWorkspace: true,
+    });
+    expect(grantedAccountFromIdToken(undefined, "id", now)).toBeNull();
+    expect(grantedAccountFromIdToken(42, "id", now)).toBeNull();
+    // The subject is Google's stable account id: required, at most 255
+    // printable ASCII characters (OpenID Connect Core 2).
+    expect(
+      grantedAccountFromIdToken(idToken({ sub: 1234567890 }), "id", now),
+    ).toBeNull();
+    expect(
+      grantedAccountFromIdToken(idToken({ sub: "s".repeat(256) }), "id", now),
+    ).toBeNull();
+    expect(
+      grantedAccountFromIdToken(idToken({ sub: "with space" }), "id", now),
+    ).toBeNull();
+    expect(
+      grantedAccountFromIdToken(idToken({ sub: "s".repeat(255) }), "id", now),
+    ).toMatchObject({ sub: "s".repeat(255) });
+    expect(
+      grantedAccountFromIdToken(
+        idToken({ email: `${"a".repeat(250)}@x.test` }),
+        "id",
+        now,
+      ),
+    ).toBeNull();
+    expect(
+      grantedAccountFromIdToken(
+        idToken({ email: "not an address" }),
+        "id",
+        now,
+      ),
+    ).toBeNull();
   });
 
   it("treats an already-invalid token as revoked but surfaces temporary failures", async () => {

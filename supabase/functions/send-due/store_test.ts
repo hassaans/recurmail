@@ -27,6 +27,7 @@ Deno.test("store void RPC callers accept 204 responses", async () => {
   await store.reconnect({
     scheduleId: "schedule-2",
     userId: "user-1",
+    connectionId: "connection-1",
     scheduledFor: "2026-10-14T17:00:00.000Z",
     recipient: "user@example.test",
     reconnectUrl: "https://app.example.test/connect",
@@ -64,4 +65,36 @@ Deno.test("data-returning RPC with an empty body still throws", async () => {
     threw = true;
   }
   assert(threw, "data-returning RPC must reject an empty response body");
+});
+
+Deno.test("reconnect RPC names the schedule, owner and connection", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const store = createStore(
+    "https://db.example.test",
+    "service-key",
+    async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(null, { status: 204 });
+    },
+  );
+  await store.reconnect({
+    scheduleId: "schedule-2",
+    userId: "user-1",
+    connectionId: "connection-1",
+    scheduledFor: "2026-10-14T17:00:00.000Z",
+    recipient: "user@example.test",
+    reconnectUrl: "https://app.example.test/connect",
+  });
+  assert(
+    JSON.stringify(bodies[0]) ===
+      JSON.stringify({
+        p_schedule_id: "schedule-2",
+        p_user_id: "user-1",
+        p_connection_id: "connection-1",
+        p_scheduled_for: "2026-10-14T17:00:00.000Z",
+        p_recipient: "user@example.test",
+        p_reconnect_url: "https://app.example.test/connect",
+      }),
+    "mark_gmail_reconnect_needed receives every per-connection argument",
+  );
 });

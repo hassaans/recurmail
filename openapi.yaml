@@ -4,7 +4,7 @@
   "info": {
     "title": "Recurmail Schedule API",
     "version": "0.1.0",
-    "description": "US-005 authenticated owner-only schedule management. All data access uses the verified user's Supabase access token and owner filters under RLS. Mutation requests require an Origin matching configured APP_URL; reads do not. The encrypted rm_session cookie establishes the session. Server-controlled id, user_id, status, next_send_at and timestamps are ignored in JSON input. New schedules are active immediately. Forecast warnings are advisory and do not block saving."
+    "description": "US-005 authenticated owner-only schedule management. All data access uses the verified user's Supabase access token and owner filters under RLS. Mutation requests require an Origin matching configured APP_URL; reads do not. The encrypted rm_session cookie establishes the session. Server-controlled id, user_id, status, next_send_at and timestamps are ignored in JSON input. New schedules are active immediately. Each schedule sends from one of the user's connected Gmail accounts, named by gmail_connection_id; when omitted on create, the first connected account is used. Forecast warnings are advisory and do not block saving."
   },
   "security": [
     {
@@ -411,7 +411,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "No connected Gmail account (gmail_not_connected), or Gmail access has expired and must be reconnected from the dashboard (gmail_reconnect_required). On gmail_reconnect_required the connection is marked needs_reconnect and the owner's active schedules are paused, the same as when the sender hits the dead token; no send history is written and no reconnect email is queued.",
+            "description": "No connected Gmail account (gmail_not_connected), or Gmail access has expired and must be reconnected from the dashboard (gmail_reconnect_required). On gmail_reconnect_required the connection the test used is marked needs_reconnect and the schedules sending from it are paused, the same as when the sender hits the dead token; the owner's other accounts and schedules are untouched, no send history is written and no reconnect email is queued.",
             "content": {
               "application/json": {
                 "schema": {
@@ -490,7 +490,7 @@
     },
     "responses": {
       "BadRequest": {
-        "description": "Malformed JSON or invalid schedule input.",
+        "description": "Malformed JSON or invalid schedule input (invalid_input), or a sending account that is missing, not the caller's, or not connected (sender_required).",
         "content": {
           "application/json": {
             "schema": {
@@ -632,6 +632,15 @@
               "mcp"
             ],
             "default": "web"
+          },
+          "gmail_connection_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "default": null,
+            "description": "The Gmail account to send from, one of the caller's connections. Omitted or null on create selects the first connected account. Must be connected when the schedule is active or being resumed; a paused schedule may name any of the caller's accounts. A missing, foreign or not-connected account is rejected with sender_required."
           }
         },
         "anyOf": [
@@ -731,6 +740,15 @@
               "cli",
               "mcp"
             ]
+          },
+          "gmail_connection_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "default": null,
+            "description": "The Gmail account to send from, one of the caller's connections. Omitted or null on create selects the first connected account. Must be connected when the schedule is active or being resumed; a paused schedule may name any of the caller's accounts. A missing, foreign or not-connected account is rejected with sender_required."
           }
         },
         "anyOf": [
@@ -778,6 +796,11 @@
             "required": [
               "source"
             ]
+          },
+          {
+            "required": [
+              "gmail_connection_id"
+            ]
           }
         ],
         "description": "Only provided editable fields are written. The resulting schedule must satisfy ScheduleInput validation, including at least one recipient. Changing RRULE or timezone recomputes next_send_at strictly after now; other edits retain it. Ownership, IDs, lifecycle and timestamps cannot be supplied."
@@ -799,7 +822,8 @@
               "cc",
               "bcc",
               "body_html",
-              "source"
+              "source",
+              "gmail_connection_id"
             ],
             "properties": {
               "id": {
@@ -880,7 +904,7 @@
           },
           "warning": {
             "type": "string",
-            "description": "Present only for a connection classified as personal (is_workspace=false) when the forecast is warn or over. Gmail versus Googlemail is determined from google_email. Workspace accounts receive their forecast without this warning."
+            "description": "Present only when the schedule's sending account is classified as personal (is_workspace=false) and the forecast is warn or over. Names the account, for example \"Personal Gmail daily recipient limit forecast for owner@gmail.com is warn (450/500).\" Gmail versus Googlemail is determined from google_email. Workspace accounts receive their forecast without this warning."
           }
         }
       },
@@ -966,7 +990,7 @@
             "minimum": 0
           }
         },
-        "description": "JSON serialization of @recurmail/core dailyLimitCheck, including ISO timestamps. Forecasts all active owner schedules over 30 elapsed days and counts every To/Cc/Bcc entry. Personal connections use a 500 recipient cap, Workspace 2000; warnings start at 80%, over means greater than the cap. No connection uses the conservative 500 cap without a personal warning."
+        "description": "JSON serialization of @recurmail/core dailyLimitCheck, including ISO timestamps. Forecasts the owner's active schedules that send from the same Gmail account as this schedule over 30 elapsed days and counts every To/Cc/Bcc entry; schedules on other accounts are counted against their own account. Personal connections use a 500 recipient cap, Workspace 2000; warnings start at 80%, over means greater than the cap. No connection uses the conservative 500 cap without a personal warning."
       },
       "PauseAllResult": {
         "type": "object",
@@ -1007,7 +1031,7 @@
           "gmail_connection_id": {
             "type": "string",
             "format": "uuid",
-            "description": "Optional. Which of the owner's Gmail connections sends the test. Must belong to the owner; otherwise 409 gmail_not_connected."
+            "description": "Which of the owner's Gmail connections sends the test. The editor always sends the account chosen in its From field. Must belong to the owner; otherwise 409 gmail_not_connected. When omitted, the owner's oldest connected account is used."
           }
         }
       },
@@ -1039,6 +1063,7 @@
                 "type": "string",
                 "enum": [
                   "invalid_input",
+                  "sender_required",
                   "unauthenticated",
                   "forbidden_origin",
                   "not_found",

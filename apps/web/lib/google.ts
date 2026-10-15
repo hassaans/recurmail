@@ -1,19 +1,45 @@
 import "server-only";
 
 export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+/**
+ * Consent asks for the send permission plus an ID token, so the callback can
+ * learn which Google account the user actually granted (OpenID Connect Core
+ * 3.1.3.7) instead of assuming it was the sign-in account.
+ */
+export const GMAIL_CONNECT_SCOPE = `openid email ${GMAIL_SEND_SCOPE}`;
+const grantedScopes = new Set([
+  "openid",
+  "email",
+  "https://www.googleapis.com/auth/userinfo.email",
+  GMAIL_SEND_SCOPE,
+]);
+const issuers = new Set(["https://accounts.google.com", "accounts.google.com"]);
+
+export interface GrantedAccount {
+  refreshToken: string;
+  /** Google's stable id for the account (the `sub` claim). It survives an address change. */
+  sub: string;
+  /** The verified address of the account that granted gmail.send. */
+  email: string;
+  isWorkspace: boolean;
+}
 
 export interface GoogleProvider {
   authorizationUrl(input: {
     redirectUri: string;
     state: string;
-    email: string;
     challenge: string;
+    /**
+     * Pre-selects this account when reconnecting it. Omitted when adding
+     * another account, which asks Google to show the account chooser.
+     */
+    email?: string;
   }): string;
   exchangeCode(
     code: string,
     redirectUri: string,
     verifier: string,
-  ): Promise<string>;
+  ): Promise<GrantedAccount>;
   revoke(refreshToken: string): Promise<void>;
   /** Exchange a stored refresh token for a short-lived access token. */
   refreshAccessToken(refreshToken: string): Promise<string>;
@@ -52,14 +78,68 @@ function loopbackOrigin(value: string, message: string): string {
   return endpoint.origin;
 }
 
+export function isWorkspaceAddress(email: string): boolean {
+  return !["gmail.com", "googlemail.com"].includes(
+    email.slice(email.lastIndexOf("@") + 1).toLowerCase(),
+  );
+}
+
+function decodeSegment(segment: string): unknown {
+  return JSON.parse(Buffer.from(segment, "base64url").toString("utf8"));
+}
+
+/**
+ * Reads the account out of an ID token returned by the token endpoint. The
+ * token arrived over TLS directly from Google, so the issuer, audience,
+ * expiry and verified-email claims are checked instead of the signature.
+ */
+export function grantedAccountFromIdToken(
+  idToken: unknown,
+  clientId: string,
+  now: number,
+): { sub: string; email: string; isWorkspace: boolean } | null {
+  if (typeof idToken !== "string") return null;
+  const parts = idToken.split(".");
+  if (parts.length !== 3) return null;
+  let claims: unknown;
+  try {
+    claims = decodeSegment(parts[1]);
+  } catch (error) {
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+  if (!claims || typeof claims !== "object") return null;
+  const { iss, aud, exp, sub, email, email_verified } = claims as Record<
+    string,
+    unknown
+  >;
+  if (typeof iss !== "string" || !issuers.has(iss)) return null;
+  if (aud !== clientId) return null;
+  if (typeof exp !== "number" || !Number.isFinite(exp) || exp * 1000 <= now)
+    return null;
+  if (email_verified !== true) return null;
+  // The subject is required (OpenID Connect Core 2) and at most 255 ASCII
+  // characters. A token without one cannot name the account.
+  if (typeof sub !== "string" || !/^[\x21-\x7e]{1,255}$/.test(sub)) return null;
+  if (
+    typeof email !== "string" ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+    email.length > 254
+  )
+    return null;
+  return { sub, email, isWorkspace: isWorkspaceAddress(email) };
+}
+
 export function createGoogleProvider(config: {
   clientId: string;
   clientSecret: string;
   testOAuthOrigin?: string;
   testGmailOrigin?: string;
   fetcher?: typeof fetch;
+  now?: () => number;
 }): GoogleProvider {
   const fetcher = config.fetcher ?? fetch;
+  const now = config.now ?? Date.now;
   let authorizationEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
   let tokenOrigin = "https://oauth2.googleapis.com";
   let gmailOrigin = "https://gmail.googleapis.com";
@@ -78,17 +158,19 @@ export function createGoogleProvider(config: {
     );
   }
   return {
-    authorizationUrl({ redirectUri, state, email, challenge }) {
+    authorizationUrl({ redirectUri, state, challenge, email }) {
       const url = new URL(authorizationEndpoint);
       url.search = new URLSearchParams({
         client_id: config.clientId,
         redirect_uri: redirectUri,
         response_type: "code",
-        scope: GMAIL_SEND_SCOPE,
+        scope: GMAIL_CONNECT_SCOPE,
         access_type: "offline",
-        prompt: "consent",
+        // A refresh token needs consent every time. Without a hinted account,
+        // the chooser lets the user pick which account to add.
+        prompt: email ? "consent" : "consent select_account",
         include_granted_scopes: "false",
-        login_hint: email,
+        ...(email ? { login_hint: email } : {}),
         state,
         code_challenge: challenge,
         code_challenge_method: "S256",
@@ -109,15 +191,24 @@ export function createGoogleProvider(config: {
         cache: "no-store",
       });
       const body = await response.json();
+      const scopes =
+        typeof body.scope === "string" ? body.scope.split(/\s+/) : [];
+      const account = grantedAccountFromIdToken(
+        body.id_token,
+        config.clientId,
+        now(),
+      );
       if (
         !response.ok ||
         typeof body.refresh_token !== "string" ||
         !body.refresh_token ||
-        body.scope !== GMAIL_SEND_SCOPE
+        !scopes.includes(GMAIL_SEND_SCOPE) ||
+        !scopes.every((scope: string) => grantedScopes.has(scope)) ||
+        !account
       ) {
         throw new Error("Gmail permission could not be granted");
       }
-      return body.refresh_token;
+      return { refreshToken: body.refresh_token, ...account };
     },
     async revoke(refreshToken) {
       const response = await fetcher(`${tokenOrigin}/revoke`, {

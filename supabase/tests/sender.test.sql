@@ -11,14 +11,14 @@ from public.send_log;
 
 insert into auth.users (id, email, aud, role) values
   ('00000000-0000-4000-8000-000000000006', 'sender@example.test', 'authenticated', 'authenticated');
-insert into public.gmail_connections (user_id, google_email, encrypted_refresh_token, status)
-values ('00000000-0000-4000-8000-000000000006', 'sender@example.test', 'ciphertext', 'connected');
+insert into public.gmail_connections (id, user_id, google_email, encrypted_refresh_token, status)
+values ('40000000-0000-4000-8000-000000000006', '00000000-0000-4000-8000-000000000006', 'sender@example.test', 'ciphertext', 'connected');
 insert into public.schedules (
-  id, user_id, subject, body_text, "to", rrule, timezone, next_send_at, status
+  id, user_id, gmail_connection_id, subject, body_text, "to", rrule, timezone, next_send_at, status
 ) values
-  ('10000000-0000-4000-8000-000000000006', '00000000-0000-4000-8000-000000000006', 'one', 'body', array['one@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '1 minute', 'active'),
-  ('10000000-0000-4000-8000-000000000007', '00000000-0000-4000-8000-000000000006', 'two', 'body', array['two@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '1 minute', 'active'),
-  ('10000000-0000-4000-8000-000000000008', '00000000-0000-4000-8000-000000000006', 'three', 'body', array['three@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '1 minute', 'active');
+  ('10000000-0000-4000-8000-000000000006', '00000000-0000-4000-8000-000000000006', '40000000-0000-4000-8000-000000000006', 'one', 'body', array['one@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '1 minute', 'active'),
+  ('10000000-0000-4000-8000-000000000007', '00000000-0000-4000-8000-000000000006', '40000000-0000-4000-8000-000000000006', 'two', 'body', array['two@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '1 minute', 'active'),
+  ('10000000-0000-4000-8000-000000000008', '00000000-0000-4000-8000-000000000006', '40000000-0000-4000-8000-000000000006', 'three', 'body', array['three@example.test'], 'FREQ=DAILY', 'UTC', now() - interval '1 minute', 'active');
 
 commit;
 begin;
@@ -49,6 +49,7 @@ select is((select status from public.schedules where id = '10000000-0000-4000-80
 select public.mark_gmail_reconnect_needed(
   '10000000-0000-4000-8000-000000000008',
   '00000000-0000-4000-8000-000000000006',
+  '40000000-0000-4000-8000-000000000006',
   now() - interval '1 minute',
   'sender@example.test',
   'https://recurmail.example.test/dashboard?gmail=failed'
@@ -63,6 +64,7 @@ select is((public.get_admin_metrics()->>'failure_rate_last_hour')::numeric, (sel
 select public.mark_gmail_reconnect_needed(
   '10000000-0000-4000-8000-000000000008',
   '00000000-0000-4000-8000-000000000006',
+  '40000000-0000-4000-8000-000000000006',
   now() - interval '1 minute',
   'sender@example.test',
   'https://recurmail.example.test/dashboard?gmail=failed'

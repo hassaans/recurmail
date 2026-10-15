@@ -106,6 +106,8 @@ jobs:
         run: supabase test db supabase/tests/reconnect-outbox.test.sql
       - name: Run test send database tests
         run: supabase test db supabase/tests/test-send.test.sql
+      - name: Run multiple Gmail account database tests
+        run: supabase test db supabase/tests/multiple-accounts.test.sql
       - name: Verify concurrent sender claims
         run: bash supabase/tests/sender-concurrency.sh
       - name: Set up Deno
