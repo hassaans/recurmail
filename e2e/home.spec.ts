@@ -225,3 +225,19 @@ test("Open Graph image route serves a PNG", async ({ request }) => {
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
   );
 });
+
+test("homepage cards are lists, not articles, so browsers don't treat it as a story", async ({
+  page,
+}) => {
+  await page.goto("/");
+  // Safari offers (or auto-opens) Reader for article-like pages.
+  await expect(page.locator("article")).toHaveCount(0);
+  await expect(page.locator("ul.cal-grid > li")).toHaveCount(6);
+  await expect(page.locator("ul.ways > li")).toHaveCount(2);
+  const markers = await page
+    .locator("ul.cal-grid, ul.ways")
+    .evaluateAll((lists) =>
+      lists.map((l) => getComputedStyle(l).listStyleType),
+    );
+  expect(markers).toEqual(["none", "none"]);
+});

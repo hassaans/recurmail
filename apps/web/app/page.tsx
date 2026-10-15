@@ -166,6 +166,7 @@ section { padding: 88px 0; }
 .steps li::before { display: grid; width: 44px; height: 44px; margin-bottom: 18px; place-items: center; border-radius: 50%; background: var(--rm-grape); color: #fff; content: counter(step); font: 700 22px/1 var(--rm-font-display); }
 .steps h3 { margin-bottom: 8px; }
 .steps p, .way p { font-size: 16px; }
+.cal-grid, .ways { margin: 0; padding: 0; list-style: none; }
 .cal-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
 .cal { display: flex; min-width: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--rm-line); border-radius: var(--rm-radius); background: var(--rm-paper); }
 .cal-head { padding: 10px 18px; background: var(--rm-grape); color: #fff; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
@@ -377,56 +378,56 @@ export default function HomePage() {
                 adjusts for daylight saving time.
               </p>
             </div>
-            <div className="cal-grid">
-              <article className="cal">
+            <ul className="cal-grid">
+              <li className="cal">
                 <div className="cal-head">Monthly</div>
                 <div className="cal-body">
                   <div className="cal-when">1st of every month</div>
                   <div className="cal-time">9:00 am</div>
                   <div className="cal-what">Rent reminder to your landlord</div>
                 </div>
-              </article>
-              <article className="cal">
+              </li>
+              <li className="cal">
                 <div className="cal-head">Weekdays</div>
                 <div className="cal-body">
                   <div className="cal-when">Every weekday</div>
                   <div className="cal-time">5:30 pm</div>
                   <div className="cal-what">End-of-day update to your team</div>
                 </div>
-              </article>
-              <article className="cal">
+              </li>
+              <li className="cal">
                 <div className="cal-head">Every 2 weeks</div>
                 <div className="cal-body">
                   <div className="cal-when">Every other Friday</div>
                   <div className="cal-time">4:00 pm</div>
                   <div className="cal-what">Timesheet to your manager</div>
                 </div>
-              </article>
-              <article className="cal">
+              </li>
+              <li className="cal">
                 <div className="cal-head">Quarterly</div>
                 <div className="cal-body">
                   <div className="cal-when">Last day of each quarter</div>
                   <div className="cal-time">10:00 am</div>
                   <div className="cal-what">Invoice to a client</div>
                 </div>
-              </article>
-              <article className="cal">
+              </li>
+              <li className="cal">
                 <div className="cal-head">Weekly</div>
                 <div className="cal-body">
                   <div className="cal-when">Every Sunday</div>
                   <div className="cal-time">11:00 am</div>
                   <div className="cal-what">Check-in with your parents</div>
                 </div>
-              </article>
-              <article className="cal">
+              </li>
+              <li className="cal">
                 <div className="cal-head">Yearly</div>
                 <div className="cal-body">
                   <div className="cal-when">Every March 14</div>
                   <div className="cal-time">8:00 am</div>
                   <div className="cal-what">Birthday note to a friend</div>
                 </div>
-              </article>
-            </div>
+              </li>
+            </ul>
           </div>
         </section>
 
@@ -440,24 +441,24 @@ export default function HomePage() {
                 your sent email from the RecurMail web app.
               </p>
             </div>
-            <div className="ways">
-              <article className="way">
+            <ul className="ways">
+              <li className="way">
                 <span className="tag">Web</span>
                 <h3>Keep your schedules together</h3>
                 <p>
                   Review upcoming sends, update a message, or pause a schedule
                   when your plans change.
                 </p>
-              </article>
-              <article className="way">
+              </li>
+              <li className="way">
                 <span className="tag">Send history</span>
                 <h3>Check what has gone out</h3>
                 <p>
                   RecurMail keeps a history of messages it sends so you can
                   confirm the date and destination.
                 </p>
-              </article>
-            </div>
+              </li>
+            </ul>
           </div>
         </section>
 
