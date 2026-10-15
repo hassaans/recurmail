@@ -18,9 +18,10 @@ test("privacy policy describes Gmail data, deletion and service providers", asyn
     "Resend",
     "Supabase",
     "Vercel",
-    "Owner placeholder. Add the legal entity name and mailing address.",
+    "RecurMail is run by Hassaan Saleem.",
   ])
     await expect(page.locator("body")).toContainText(text);
+  await expect(page.locator("body")).not.toContainText("placeholder");
   await expect(
     page.getByRole("link", { name: "Terms", exact: true }),
   ).toHaveAttribute("href", "/terms");
@@ -101,4 +102,32 @@ test("legal pages are linked from the homepage, guides and app footer", async ({
   await expect(
     page.getByRole("heading", { name: "Terms of Service" }),
   ).toBeVisible();
+});
+
+test("legal pages name the operator and both contact addresses, and every footer links to support", async ({
+  page,
+}) => {
+  for (const path of ["/privacy", "/terms"]) {
+    await page.goto(path);
+    const main = page.getByRole("main");
+    await expect(main).toContainText("RecurMail is run by Hassaan Saleem.");
+    await expect(main).not.toContainText("placeholder");
+    await expect(
+      main.getByRole("link", { name: "support@recurmail.com" }),
+    ).toHaveAttribute("href", "mailto:support@recurmail.com");
+    await expect(
+      main.getByRole("link", { name: "hassaan@recurmail.com" }),
+    ).toHaveAttribute("href", "mailto:hassaan@recurmail.com");
+  }
+  for (const route of [
+    "/",
+    "/guides/recurring-email-gmail",
+    "/privacy",
+    "/dashboard",
+  ]) {
+    await page.goto(route);
+    await expect(
+      page.getByRole("contentinfo").getByRole("link", { name: "Support" }),
+    ).toHaveAttribute("href", "mailto:support@recurmail.com");
+  }
 });
