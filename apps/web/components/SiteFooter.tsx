@@ -8,6 +8,7 @@ export function SiteFooter({ variant }: SiteFooterProps) {
           <nav aria-label="Legal">
             <a href="/privacy">Privacy</a>
             <a href="/terms">Terms</a>
+            <a href="mailto:support@recurmail.com">Support</a>
           </nav>
           <p>
             Gmail is a trademark of Google LLC. RecurMail is not affiliated with
@@ -30,6 +31,8 @@ export function SiteFooter({ variant }: SiteFooterProps) {
           <a href="/privacy">Privacy</a>
           {" · "}
           <a href="/terms">Terms</a>
+          {" · "}
+          <a href="mailto:support@recurmail.com">Support</a>
         </nav>
       </div>
     </footer>
