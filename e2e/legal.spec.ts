@@ -118,7 +118,7 @@ test("legal pages name the operator and the support, privacy and legal addresses
   page,
 }) => {
   for (const [path, updated] of [
-    ["/privacy", "October 19, 2026"],
+    ["/privacy", "October 21, 2026"],
     ["/terms", "October 15, 2026"],
   ]) {
     await page.goto(path);
