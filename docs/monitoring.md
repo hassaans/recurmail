@@ -18,7 +18,7 @@ The pg_cron jobs require only these Vault secrets:
 The jobs send these values as `Content-Type` and
 `x-recurmail-cron-secret` headers. They do not store or send a Supabase API key.
 
-Create this monitor in the Sentry project that receives the web DSN before deploying with Sentry enabled.
+`send-due` sends this configuration with every in-progress check-in, so Sentry creates the monitor on the first run and keeps it in sync. Set the owner as the monitor's alert recipient in Sentry. The function flushes queued errors, check-ins and metrics before it returns, because the edge runtime can stop it once the response is sent.
 
 - Slug is `send-due-every-minute`.
 - Schedule runs every minute in UTC.
