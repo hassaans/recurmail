@@ -112,7 +112,7 @@ test("legal pages name the operator and the support, privacy and legal addresses
     const main = page.getByRole("main");
     await expect(main).toContainText("RecurMail is run by Hassaan Saleem.");
     await expect(page.locator("body")).toContainText(
-      "Last updated October 15, 2026",
+      "Last updated October 16, 2026",
     );
     await expect(main).not.toContainText("placeholder");
     await expect(
