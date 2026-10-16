@@ -6,6 +6,7 @@ import { resolveSupabaseSecretKey } from "./secret-key.ts";
 import {
   captureError,
   finishCronCheckIn,
+  flushSentry,
   initSentry,
   startCronCheckIn,
 } from "./sentry.ts";
@@ -53,6 +54,8 @@ Deno.serve(
         captureError(error, dsn);
         finishCronCheckIn(checkIn, "error");
         throw error;
+      } finally {
+        await flushSentry(dsn);
       }
     },
   }),
