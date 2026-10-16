@@ -3,6 +3,8 @@ import "server-only";
 export interface SignedInUser {
   id: string;
   email: string;
+  /** When the Supabase user was created; absent when Supabase did not say. */
+  createdAt?: string;
 }
 export interface Session {
   accessToken: string;
@@ -103,7 +105,14 @@ export function createSupabaseAuth(config: {
         !data.email
       )
         return null;
-      return { id: data.id, email: data.email };
+      return {
+        id: data.id,
+        email: data.email,
+        ...(typeof data.created_at === "string" &&
+        !Number.isNaN(Date.parse(data.created_at))
+          ? { createdAt: data.created_at }
+          : {}),
+      };
     },
   };
 }

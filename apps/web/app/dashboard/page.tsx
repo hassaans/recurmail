@@ -200,7 +200,11 @@ export default async function Dashboard({
           </div>
           {connected ? (
             <div className={styles.headerActions}>
-              <a className={controls.primary} href="/schedules/new">
+              <a
+                className={controls.primary}
+                href="/schedules/new"
+                data-track="new_schedule_click"
+              >
                 New schedule
               </a>
             </div>
@@ -230,7 +234,13 @@ export default async function Dashboard({
             Sign in with Google, then connect the Gmail accounts you want to
             send scheduled emails from.
           </p>
-          <a className={controls.primary} href="/auth/signin">
+          <a
+            className={controls.primary}
+            href="/auth/signin"
+            data-track="cta_click"
+            data-track-location="dashboard"
+            data-track-label="sign_in_with_google"
+          >
             Sign in with Google
           </a>
         </section>
@@ -252,7 +262,12 @@ export default async function Dashboard({
                 action="/api/gmail/connect"
               >
                 <input type="hidden" name="id" value={connections[0].id} />
-                <button className={controls.primary} type="submit">
+                <button
+                  className={controls.primary}
+                  type="submit"
+                  data-track="reconnect_gmail_click"
+                  data-track-location="banner"
+                >
                   Reconnect Gmail
                 </button>
               </form>
@@ -304,7 +319,12 @@ export default async function Dashboard({
               </span>
             </div>
             <form method="post" action="/api/gmail/connect">
-              <button className={controls.primary} type="submit">
+              <button
+                className={controls.primary}
+                type="submit"
+                data-track="connect_gmail_click"
+                data-track-retry={params.gmail === "denied" ? "true" : "false"}
+              >
                 {params.gmail === "denied"
                   ? "Try connecting Gmail again"
                   : "Connect Gmail"}
