@@ -6,6 +6,7 @@ import { type ComponentProps, createElement } from "react";
 import { renderToString } from "react-dom/server";
 import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
+import Analytics from "../components/Analytics";
 import ConfirmForm from "../components/ConfirmForm";
 import DashboardNotices from "../components/DashboardNotices";
 import { HeaderMenu } from "../components/HeaderMenu";
@@ -51,10 +52,14 @@ type DashboardNoticesPropsAreDataOnly = Assert<
 type HeaderMenuPropsAreDataOnly = Assert<
   HasFunction<ComponentProps<typeof HeaderMenu>> extends false ? true : false
 >;
+type AnalyticsPropsAreDataOnly = Assert<
+  HasFunction<ComponentProps<typeof Analytics>> extends false ? true : false
+>;
 
 vi.stubGlobal("React", React);
 
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/",
   useRouter: () => ({
     back: vi.fn(),
     forward: vi.fn(),
@@ -69,6 +74,7 @@ const webRoot = path.resolve(
   "..",
 );
 const expectedPages = [
+  "app/layout.tsx",
   "app/(app)/schedules/new/page.tsx",
   "app/(app)/schedules/[id]/edit/page.tsx",
   "app/(app)/schedules/[id]/page.tsx",
@@ -241,6 +247,7 @@ describe("server/client prop boundaries", () => {
     const pauseButtonPropsAreDataOnly: SchedulePauseButtonPropsAreDataOnly = true;
     const noticesPropsAreDataOnly: DashboardNoticesPropsAreDataOnly = true;
     const headerMenuPropsAreDataOnly: HeaderMenuPropsAreDataOnly = true;
+    const analyticsPropsAreDataOnly: AnalyticsPropsAreDataOnly = true;
 
     expect(editorPropsAreDataOnly).toBe(true);
     expect(listPropsAreDataOnly).toBe(true);
@@ -248,6 +255,7 @@ describe("server/client prop boundaries", () => {
     expect(pauseButtonPropsAreDataOnly).toBe(true);
     expect(noticesPropsAreDataOnly).toBe(true);
     expect(headerMenuPropsAreDataOnly).toBe(true);
+    expect(analyticsPropsAreDataOnly).toBe(true);
   });
 
   it("round-trips representative client component props through JSON", () => {
@@ -407,6 +415,9 @@ describe("server/client prop boundaries", () => {
     expect(menu).toContain('aria-expanded="false"');
     expect(menu).toMatch(/<ul[^>]*hidden=""/);
     expect(menu).toContain('href="/dashboard"');
+    expect(menu).toContain('data-track="nav_menu_opened"');
+    // Analytics renders nothing: it only listens once hydrated.
+    expect(renderToString(createElement(Analytics))).toBe("");
   });
 
   it("keeps the server pages passing only data to imported client components", () => {

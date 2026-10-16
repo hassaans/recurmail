@@ -71,6 +71,8 @@ export default function GmailAccounts({
                     <button
                       className={`${controls.primary} ${controls.small}`}
                       type="submit"
+                      data-track="reconnect_gmail_click"
+                      data-track-location="accounts"
                     >
                       Reconnect
                     </button>
@@ -101,6 +103,7 @@ export default function GmailAccounts({
             <button
               className={`${controls.secondary} ${controls.small}`}
               type="submit"
+              data-track="add_gmail_account_click"
             >
               Add another Gmail account
             </button>

@@ -1,5 +1,11 @@
 import "server-only";
 import { createAccountHandler } from "./account-flow";
+import {
+  createEventsHandler,
+  createServerAnalytics,
+  tokenIdentity,
+} from "./analytics-server";
+import { createAnalyticsStore } from "./analytics-store";
 import { createAuthHandlers, readSession } from "./auth-flow";
 import { createConnectionStore, type PublicConnection } from "./connections";
 import { type Authenticate, createGmailHandlers } from "./gmail-flow";
@@ -71,6 +77,15 @@ export function createRuntime(config: RuntimeConfig) {
     const user = await auth.getUser(session.accessToken);
     return user ? { user, accessToken: session.accessToken } : null;
   };
+  const analyticsStore = createAnalyticsStore({
+    url: config.supabaseUrl,
+    secretKey: config.secretKey,
+    fetcher: config.fetcher,
+  });
+  const analytics = createServerAnalytics({
+    origin: config.origin,
+    store: analyticsStore,
+  });
   return {
     account: createAccountHandler({
       origin: config.origin,
@@ -79,6 +94,7 @@ export function createRuntime(config: RuntimeConfig) {
       store,
       google,
       admin,
+      analytics,
     }),
     ...createGmailHandlers({
       origin: config.origin,
@@ -86,12 +102,14 @@ export function createRuntime(config: RuntimeConfig) {
       authenticate,
       store,
       google,
+      analytics,
     }),
     auth: createAuthHandlers({
       origin: config.origin,
       key: config.key,
       auth,
       google: googleSignIn,
+      analytics,
     }),
     schedules: createScheduleHandlers({
       origin: config.origin,
@@ -101,6 +119,7 @@ export function createRuntime(config: RuntimeConfig) {
         publishableKey: config.publishableKey,
         fetcher: config.fetcher,
       }),
+      analytics,
     }),
     testSend: createTestSendHandler({
       origin: config.origin,
@@ -112,6 +131,13 @@ export function createRuntime(config: RuntimeConfig) {
         secretKey: config.secretKey,
         fetcher: config.fetcher,
       }),
+      analytics,
+    }),
+    events: createEventsHandler({
+      origin: config.origin,
+      store: analyticsStore,
+      identity: (request) =>
+        tokenIdentity(readSession(request, config.key)?.accessToken),
     }),
     async dashboard(request: Request): Promise<DashboardState> {
       try {
@@ -174,6 +200,17 @@ export async function runScheduleRoute(
       400,
     );
   return runtime.schedules[operation](request, id);
+}
+
+// Analytics must never fail a page: without a runtime the event is dropped.
+export async function runEventsRoute(request: Request): Promise<Response> {
+  const runtime = configuredRuntime();
+  if (!runtime)
+    return new Response(null, {
+      status: 204,
+      headers: { "Cache-Control": "no-store" },
+    });
+  return runtime.events(request);
 }
 
 export async function runTestSendRoute(request: Request): Promise<Response> {

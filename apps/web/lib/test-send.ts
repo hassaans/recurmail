@@ -1,5 +1,6 @@
 import "server-only";
 import { buildMime } from "@recurmail/core";
+import type { ServerAnalytics } from "./analytics-server";
 import { decryptRefreshToken } from "./crypto";
 import type { Authenticate } from "./gmail-flow";
 import {
@@ -269,6 +270,7 @@ export function createTestSendHandler(config: {
   authenticate: Authenticate;
   google: Pick<GoogleProvider, "refreshAccessToken" | "sendMessage">;
   store: TestSendStore;
+  analytics?: ServerAnalytics;
   now?: () => number;
 }) {
   const now = config.now ?? Date.now;
@@ -278,6 +280,19 @@ export function createTestSendHandler(config: {
     const identity = await config.authenticate(request);
     if (!identity)
       return failure(401, "unauthenticated", "Sign in to send a test email");
+    // The outcome is recorded once the handler has decided it, whichever
+    // branch decided. A refusal the user can act on (reconnect, rate limit)
+    // is a failure with that reason; input errors are not recorded.
+    const outcome = async (sent: boolean, reason?: string) =>
+      config.analytics?.track(
+        request,
+        sent ? "test_email_sent" : "test_email_failed",
+        {
+          userId: identity.user.id,
+          userEmail: identity.user.email,
+          ...(reason ? { properties: { reason } } : {}),
+        },
+      );
     try {
       let payload: unknown;
       try {
@@ -304,13 +319,18 @@ export function createTestSendHandler(config: {
         connectionId,
         config.store,
       );
-      if (sender?.status !== "connected")
+      if (sender?.status !== "connected") {
+        await outcome(false, "gmail_not_connected");
         return failure(409, "gmail_not_connected", "Connect Gmail first");
+      }
       const at = now();
       // Reserve first, then send. The reservation is the record of the send;
       // anything short of Gmail accepting the message gives it back.
       const claim = await config.store.claim(identity.user.id);
-      if (!claim.allowed) return rateLimited(claim.oldestSentAt, at);
+      if (!claim.allowed) {
+        await outcome(false, "rate_limited");
+        return rateLimited(claim.oldestSentAt, at);
+      }
       let delivered = false;
       try {
         const refreshToken = decryptRefreshToken(
@@ -331,6 +351,7 @@ export function createTestSendHandler(config: {
               identity.user.id,
               sender.id,
             );
+            await outcome(false, "gmail_reconnect_required");
             return failure(
               409,
               "gmail_reconnect_required",
@@ -352,6 +373,7 @@ export function createTestSendHandler(config: {
         } catch (error) {
           if (error instanceof GmailSendError) {
             console.error("[ERROR] test_send_gmail_failed");
+            await outcome(false, "gmail_send_failed");
             return failure(
               502,
               "gmail_send_failed",
@@ -361,6 +383,7 @@ export function createTestSendHandler(config: {
           throw error;
         }
         delivered = true;
+        await outcome(true);
         return scheduleJson({ sent_to: identity.user.email });
       } finally {
         if (!delivered)
@@ -370,6 +393,7 @@ export function createTestSendHandler(config: {
       if (error instanceof RequestError)
         return failure(error.status, error.code, error.message);
       console.error("[ERROR] test_send_failed");
+      await outcome(false, "internal_error");
       return failure(500, "internal_error", "Could not send the test email");
     }
   };

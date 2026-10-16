@@ -243,7 +243,13 @@ export default function HomePage() {
                 replies come back to you. It is free to use.
               </div>
               <div className="hero-cta">
-                <a className="btn btn-primary" href="/auth/signin">
+                <a
+                  className="btn btn-primary"
+                  href="/auth/signin"
+                  data-track="cta_click"
+                  data-track-location="hero"
+                  data-track-label="create_free_account"
+                >
                   Create free account
                   <svg
                     width="18"
@@ -259,7 +265,13 @@ export default function HomePage() {
                     <path d="M5 12h14M13 6l6 6-6 6" />
                   </svg>
                 </a>
-                <a className="btn btn-ghost" href="#how-it-works">
+                <a
+                  className="btn btn-ghost"
+                  href="#how-it-works"
+                  data-track="cta_click"
+                  data-track-location="hero"
+                  data-track-label="see_how_it_works"
+                >
                   See how it works
                 </a>
               </div>
@@ -543,7 +555,12 @@ export default function HomePage() {
             </div>
             <div className="faq">
               {faqs.map(({ question, answer }, index) => (
-                <details key={question} open={index === 0}>
+                <details
+                  key={question}
+                  open={index === 0}
+                  data-track-toggle="faq_opened"
+                  data-track-question={index + 1}
+                >
                   <summary>{question}</summary>
                   <div className="p">{answer}</div>
                 </details>
@@ -590,7 +607,13 @@ export default function HomePage() {
             <div className="p">
               Choose the recipients, write the email, and set its schedule.
             </div>
-            <a className="btn" href="/auth/signin">
+            <a
+              className="btn"
+              href="/auth/signin"
+              data-track="cta_click"
+              data-track-location="final_cta"
+              data-track-label="create_free_account"
+            >
               Create free account
             </a>
           </div>

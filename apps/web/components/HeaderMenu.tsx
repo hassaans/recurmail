@@ -3,7 +3,12 @@
 import { useEffect, useId, useRef, useState } from "react";
 import styles from "./SiteHeader.module.css";
 
-export type HeaderLink = { href: string; label: string };
+export type HeaderLink = {
+  href: string;
+  label: string;
+  /** The analytics event a click on the link reports. */
+  track?: string;
+};
 
 /**
  * The phone and tablet menu: a disclosure button and the panel it controls
@@ -47,6 +52,7 @@ export function HeaderMenu({ links }: { links: HeaderLink[] }) {
         aria-expanded={open}
         aria-controls={panelId}
         aria-label="Menu"
+        data-track={open ? undefined : "nav_menu_opened"}
         onClick={() => setOpen((value) => !value)}
       >
         <svg
@@ -67,7 +73,12 @@ export function HeaderMenu({ links }: { links: HeaderLink[] }) {
       <ul ref={panel} id={panelId} className={styles.panel} hidden={!open}>
         {links.map((link) => (
           <li key={link.href}>
-            <a href={link.href} onClick={() => setOpen(false)}>
+            <a
+              href={link.href}
+              data-track={link.track}
+              data-track-location="menu"
+              onClick={() => setOpen(false)}
+            >
               {link.label}
             </a>
           </li>

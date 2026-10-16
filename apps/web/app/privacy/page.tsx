@@ -36,6 +36,7 @@ export default function PrivacyPage() {
         <li>The refresh token needed to send scheduled messages.</li>
         <li>Schedule rules, recipients, subject and message content.</li>
         <li>Send time, status and error code for delivery history.</li>
+        <li>Usage and device records from your visits, described below.</li>
       </ul>
       <p>
         The refresh token is encrypted before it is stored. It is not sent to
@@ -56,6 +57,19 @@ export default function PrivacyPage() {
         so we can diagnose service failures. We do not use third-party product
         analytics.
       </p>
+      <h2>Usage and device data</h2>
+      <p>
+        When you visit RecurMail we record the pages you view and actions you
+        take, the site that referred you, your IP address, browser and device
+        details, and approximate location. If you are signed in, these records
+        include your account email. We use this to understand how people find
+        and use RecurMail. It is stored in our own database and is not sold or
+        shared for advertising.
+      </p>
+      <p>
+        Usage records are kept indefinitely, including after you delete your
+        account.
+      </p>
       <h2>Service providers and retention</h2>
       <p>
         Supabase stores account and application data. Vercel hosts the web app.
@@ -71,8 +85,9 @@ export default function PrivacyPage() {
         revoke the stored token and pauses your schedules. You can delete your
         account from Settings. RecurMail attempts to revoke the Google token and
         then deletes your account and its related schedules, Gmail connection,
-        send history and reconnect data. If Google revocation is unavailable,
-        RecurMail still deletes the account and stored token.
+        send history and reconnect data. Usage records are kept, as stated
+        above. If Google revocation is unavailable, RecurMail still deletes the
+        account and stored token.
       </p>
       <h2>Contact</h2>
       <p>
