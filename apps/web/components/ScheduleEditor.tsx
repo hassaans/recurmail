@@ -3,6 +3,7 @@
 import { nextOccurrence, presets, type Weekday } from "@recurmail/core";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { track } from "../lib/analytics-client";
 import {
   buildCustomRule,
   type CustomRule,
@@ -317,6 +318,13 @@ export default function ScheduleEditor({
   const baselineRef = useRef<string | null>(null);
   const bodyEditedRef = useRef(false);
   const leavingRef = useRef(false);
+  const openedRef = useRef(false);
+
+  useEffect(() => {
+    if (openedRef.current) return;
+    openedRef.current = true;
+    track("editor_opened", { mode: scheduleId ? "edit" : "new" });
+  }, [scheduleId]);
 
   // New schedules start in the browser's zone at the next whole hour on today's
   // weekday. Existing schedules keep what was saved.

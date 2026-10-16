@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { DM_Sans, Plus_Jakarta_Sans } from "next/font/google";
 import type { ReactNode } from "react";
+import Analytics from "../components/Analytics";
 import "./globals.css";
 
 const plusJakartaSans = Plus_Jakarta_Sans({
@@ -37,7 +38,10 @@ export default function RootLayout({
       lang="en"
       className={[plusJakartaSans.variable, dmSans.variable].join(" ")}
     >
-      <body>{children}</body>
+      <body>
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }

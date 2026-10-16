@@ -68,6 +68,8 @@ describe("account deletion", () => {
           return Response.json({});
         if (url === "https://db.test/auth/v1/admin/users/owner")
           return Response.json({ id: user.id });
+        if (url === "https://db.test/rest/v1/analytics_events")
+          return new Response(null, { status: 201 });
         throw new Error("Unexpected request: " + url);
       },
     );
@@ -87,7 +89,15 @@ describe("account deletion", () => {
       "https://oauth2.googleapis.com/revoke",
       "https://oauth2.googleapis.com/revoke",
       "https://db.test/auth/v1/admin/users/owner",
+      // The deletion is recorded against the browser only, after the user is gone.
+      "https://db.test/rest/v1/analytics_events",
     ]);
+    expect(JSON.parse(String(calls[5].init?.body))).toMatchObject({
+      event: "account_deleted",
+      user_id: null,
+      user_email: null,
+      properties: { account_count: 2 },
+    });
     expect(
       calls
         .slice(2, 4)

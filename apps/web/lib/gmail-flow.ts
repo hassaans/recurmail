@@ -1,5 +1,6 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
+import type { ServerAnalytics } from "./analytics-server";
 import {
   ConnectionAddressConflictError,
   ConnectionLimitError,
@@ -26,10 +27,13 @@ export function createGmailHandlers(config: {
   authenticate: Authenticate;
   store: ConnectionStore;
   google: GoogleProvider;
+  analytics?: ServerAnalytics;
   now?: () => number;
 }) {
   const now = config.now ?? Date.now;
   const callbackUri = `${config.origin}/api/gmail/callback`;
+  const track: ServerAnalytics["track"] = async (request, event, input) =>
+    config.analytics?.track(request, event, input);
   const result = (status: string, email?: string) =>
     redirectResponse(
       config.origin,
@@ -82,6 +86,14 @@ export function createGmailHandlers(config: {
           : undefined;
         if (!reconnecting && connections.length >= MAX_GMAIL_CONNECTIONS)
           return result("limit");
+        await track(request, "gmail_connect_started", {
+          userId: identity.user.id,
+          userEmail: identity.user.email,
+          properties: {
+            reconnect: Boolean(reconnecting),
+            account_count: connections.length,
+          },
+        });
         const state = randomBytes(32).toString("base64url");
         const verifier = randomBytes(32).toString("base64url");
         const envelope = encryptRefreshToken(
@@ -143,12 +155,19 @@ export function createGmailHandlers(config: {
           saved.expiresAt <= now()
         )
           return clearState(result("failed"));
-        if (params.get("error"))
-          return clearState(
-            result(
-              params.get("error") === "access_denied" ? "denied" : "failed",
-            ),
+        if (params.get("error")) {
+          const denied = params.get("error") === "access_denied";
+          await track(
+            request,
+            denied ? "gmail_connect_denied" : "gmail_connect_failed",
+            {
+              userId: identity.user.id,
+              userEmail: identity.user.email,
+              properties: { reason: "google" },
+            },
           );
+          return clearState(result(denied ? "denied" : "failed"));
+        }
         const code = params.get("code");
         if (!code) return clearState(result("failed"));
         const granted = await config.google.exchangeCode(
@@ -175,6 +194,14 @@ export function createGmailHandlers(config: {
           status: "connected",
           connected_at: new Date(now()).toISOString(),
         });
+        await track(request, "gmail_connected", {
+          userId: identity.user.id,
+          userEmail: identity.user.email,
+          properties: {
+            workspace: granted.isWorkspace,
+            reconnect: typeof saved.hint === "string",
+          },
+        });
         return clearState(result("connected", granted.email));
       } catch (error) {
         // The account cap and an address already held by another of the
@@ -184,6 +211,9 @@ export function createGmailHandlers(config: {
         else if (error instanceof ConnectionAddressConflictError)
           status = "address_in_use";
         if (status === "failed") console.error("[ERROR] gmail_callback_failed");
+        await track(request, "gmail_connect_failed", {
+          properties: { reason: status },
+        });
         // A grant that could not be persisted must not remain active at Google.
         if (token) {
           try {
@@ -220,6 +250,10 @@ export function createGmailHandlers(config: {
           ),
         );
         await config.store.delete(identity.user.id, id);
+        await track(request, "gmail_disconnected", {
+          userId: identity.user.id,
+          userEmail: identity.user.email,
+        });
         return clearState(result("disconnected", credential.google_email));
       } catch {
         console.error("[ERROR] gmail_disconnect_failed");

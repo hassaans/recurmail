@@ -1,4 +1,5 @@
 import "server-only";
+import type { ServerAnalytics } from "./analytics-server";
 import { SESSION_COOKIE } from "./auth-flow";
 import type { ConnectionStore } from "./connections";
 import { decryptRefreshToken } from "./crypto";
@@ -14,6 +15,7 @@ export function createAccountHandler(config: {
   store: ConnectionStore;
   google: GoogleProvider;
   admin: SupabaseAdmin;
+  analytics?: ServerAnalytics;
 }) {
   const forbidden = () =>
     new Response("Request origin is not allowed", {
@@ -62,6 +64,11 @@ export function createAccountHandler(config: {
         }
       }
       await config.admin.deleteUser(identity.user.id);
+      // Deleting the user removes their analytics rows with them, so this
+      // event is kept against the browser only.
+      await config.analytics?.track(request, "account_deleted", {
+        properties: { account_count: encrypted.length },
+      });
       const response = redirectResponse(config.origin, "/?account=deleted");
       response.headers.append(
         "Set-Cookie",

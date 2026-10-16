@@ -25,7 +25,11 @@ function sectionLinks(props: SiteHeaderProps): HeaderLink[] {
   ];
 }
 
-const login: HeaderLink = { href: "/dashboard", label: "Log in" };
+const login: HeaderLink = {
+  href: "/dashboard",
+  label: "Log in",
+  track: "login_click",
+};
 
 export function SiteHeader(props: SiteHeaderProps) {
   const links = sectionLinks(props);
@@ -44,11 +48,23 @@ export function SiteHeader(props: SiteHeaderProps) {
         <ul className={menu ? styles.links : `${styles.links} ${styles.inRow}`}>
           {[...links, login].map((link) => (
             <li key={link.href}>
-              <a href={link.href}>{link.label}</a>
+              <a
+                href={link.href}
+                data-track={link.track}
+                data-track-location="header"
+              >
+                {link.label}
+              </a>
             </li>
           ))}
         </ul>
-        <a className={styles.cta} href="/auth/signin">
+        <a
+          className={styles.cta}
+          href="/auth/signin"
+          data-track="cta_click"
+          data-track-location="header"
+          data-track-label="create_free_account"
+        >
           <span className={styles.ctaLong}>Create free account</span>
           <span className={styles.ctaShort}>Sign up free</span>
         </a>

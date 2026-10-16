@@ -134,7 +134,13 @@ export default function RecurringEmailGmailGuide() {
             <section aria-labelledby="next-title">
               <h2 id="next-title">See the recurring email options</h2>
               <p>
-                <a className="text-link" href="/">
+                <a
+                  className="text-link"
+                  href="/"
+                  data-track="cta_click"
+                  data-track-location="guide"
+                  data-track-label="how_recurmail_works"
+                >
                   Read how RecurMail works
                 </a>{" "}
                 or compare it with a{" "}

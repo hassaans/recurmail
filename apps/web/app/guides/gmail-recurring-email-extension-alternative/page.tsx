@@ -136,7 +136,13 @@ export default function GmailExtensionAlternativeGuide() {
             <section aria-labelledby="learn-title">
               <h2 id="learn-title">Learn how recurring email works</h2>
               <p>
-                <a className="text-link" href="/">
+                <a
+                  className="text-link"
+                  href="/"
+                  data-track="cta_click"
+                  data-track-location="guide"
+                  data-track-label="features_and_privacy"
+                >
                   See RecurMail&apos;s features and privacy details
                 </a>
                 , or read{" "}
