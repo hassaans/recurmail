@@ -43,8 +43,8 @@ interface OpenApiDocument {
 
 function document(): OpenApiDocument {
   // JSON syntax is valid YAML. Requiring this subset lets every client load the
-  // root OpenAPI document without adding a YAML parser dependency to the tests.
-  return JSON.parse(readFileSync(new URL("openapi.yaml", root), "utf8"));
+  // OpenAPI document without adding a YAML parser dependency to the tests.
+  return JSON.parse(readFileSync(new URL("docs/openapi.yaml", root), "utf8"));
 }
 
 function exportedNames(source: string, filename: string) {
