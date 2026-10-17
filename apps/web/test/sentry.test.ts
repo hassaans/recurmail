@@ -43,4 +43,55 @@ describe("Sentry event scrubbing", () => {
     expect(serialized).toContain("[Filtered email]");
     expect(serialized).toContain("[Filtered]");
   });
+
+  it("keeps a React error's code but drops its arguments", () => {
+    const event = beforeSend({
+      exception: {
+        values: [
+          {
+            type: "Error",
+            value:
+              "Minified React error #418; visit https://react.dev/errors/418?args[]=Quarterly%20report&args[]=owner%40example.com for the full message",
+          },
+        ],
+      },
+    });
+
+    expect(event.exception.values[0]?.value).toBe("Minified React error #418");
+  });
+
+  it("groups React errors by code and page instead of by stack", () => {
+    const hydration = (transaction: string) =>
+      beforeSend({
+        transaction,
+        exception: {
+          values: [
+            { type: "Error", value: "Minified React error #418; visit" },
+          ],
+        },
+      }).fingerprint;
+
+    expect(hydration("/")).toEqual(["react-error", "418", "/"]);
+    expect(hydration("/schedules/new")).toEqual([
+      "react-error",
+      "418",
+      "/schedules/new",
+    ]);
+    expect(
+      hydration("/schedules/0f8b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d/edit"),
+    ).toEqual(["react-error", "418", "/schedules/[id]/edit"]);
+  });
+
+  it("leaves other errors filtered and grouped by stack", () => {
+    const event = beforeSend({
+      transaction: "/",
+      exception: { values: [{ type: "Error", value: "Network failed" }] },
+    }) as {
+      fingerprint?: string[];
+      exception: { values: { value: string }[] };
+    };
+
+    expect(event.exception.values[0]?.value).toBe("[Filtered error]");
+    expect(event.fingerprint).toBeUndefined();
+  });
 });

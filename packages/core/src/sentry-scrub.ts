@@ -3,6 +3,14 @@ export type SentryEvent = Record<string, unknown>;
 const email = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const privateContentKey =
   /^(?:body|body_text|body_html|subject|recipient|recipients|to|cc|bcc|email|raw|html|text|message|data|query_string|cookies?)$/i;
+const minifiedReactError = /^Minified React error #(\d+)\b/;
+
+/** Returns the code of a production React error, which names the error without any page content. */
+export function reactErrorCode(value: unknown): string | undefined {
+  return typeof value === "string"
+    ? minifiedReactError.exec(value)?.[1]
+    : undefined;
+}
 
 function scrubValue(value: unknown, key = ""): unknown {
   if (privateContentKey.test(key)) return "[Filtered]";
@@ -31,7 +39,12 @@ export function scrubSentryEvent<T extends object>(event: T): T {
     if (Array.isArray(values)) {
       (exception as { values: unknown[] }).values = values.map((item) => {
         if (!item || typeof item !== "object") return item;
-        return { ...item, value: "[Filtered error]" };
+        // React's code is kept; its arguments are dropped with the rest of the message.
+        const code = reactErrorCode((item as { value?: unknown }).value);
+        const value = code
+          ? `Minified React error #${code}`
+          : "[Filtered error]";
+        return { ...item, value };
       });
     }
   }
