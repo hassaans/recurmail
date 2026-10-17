@@ -12,4 +12,8 @@ export { buildMime } from "./mime.ts";
 export type { PresetTime, Weekday } from "./schedule.ts";
 export { nextOccurrence, presets } from "./schedule.ts";
 
-export { type SentryEvent, scrubSentryEvent } from "./sentry-scrub.ts";
+export {
+  reactErrorCode,
+  type SentryEvent,
+  scrubSentryEvent,
+} from "./sentry-scrub.ts";
