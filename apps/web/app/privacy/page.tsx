@@ -59,20 +59,26 @@ export default function PrivacyPage() {
       <h2 id="sharing">How Google user data is shared</h2>
       <p>
         Google user data means your Google account email address and identifier,
-        the Gmail access token, and the messages RecurMail sends through Gmail
-        for you. RecurMail does not sell Google user data. It does not use it
-        for advertising, and does not use it to train artificial intelligence or
-        machine learning models.
+        the Gmail access and refresh tokens, and the messages RecurMail sends
+        through Gmail for you. RecurMail does not sell Google user data. It does
+        not use it for advertising, and does not use it to train artificial
+        intelligence or machine learning models.
       </p>
       <p>RecurMail shares or transfers Google user data only in these cases:</p>
       <ul>
+        <li>
+          With the recipients you choose. Each scheduled message, including its
+          subject and content, is delivered to the To, Cc and Bcc addresses you
+          set, and so to their email providers.
+        </li>
         <li>
           With Google, to send each scheduled message through the Gmail API and
           to revoke access when you disconnect Gmail or delete your account.
         </li>
         <li>
-          With Supabase, which stores the data, and Vercel, which hosts the web
-          app. They process it only to provide their service to RecurMail.
+          With Supabase, which stores the data, including the encrypted refresh
+          token, and Vercel, which hosts the web app. They process it only to
+          provide their service to RecurMail.
         </li>
         <li>
           With Resend, only the Gmail address that lost access and a link to
@@ -98,8 +104,9 @@ export default function PrivacyPage() {
         </li>
         <li>
           The Gmail refresh token is encrypted with AES-256-GCM using a key kept
-          outside the database. It is decrypted only on our servers to send your
-          messages, and is never sent to your browser.
+          outside the database. It is decrypted only on our servers, to send
+          your messages or to revoke Google access when you disconnect Gmail or
+          delete your account, and is never sent to your browser.
         </li>
         <li>
           Supabase encrypts stored data at rest. Database row-level security

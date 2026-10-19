@@ -19,8 +19,17 @@ test("privacy policy describes Gmail data, deletion and service providers", asyn
     "Supabase",
     "Vercel",
     "RecurMail is run by Hassaan Saleem.",
+    "RecurMail does not sell Google user data.",
+    "To, Cc and Bcc addresses you set",
+    "AES-256-GCM",
   ])
     await expect(page.locator("body")).toContainText(text);
+  // Google's OAuth reviewers are sent straight to these two sections.
+  for (const [id, name] of [
+    ["sharing", "How Google user data is shared"],
+    ["protection", "How we protect your data"],
+  ])
+    await expect(page.locator(`h2#${id}`)).toHaveText(name);
   await expect(page.locator("body")).not.toContainText("placeholder");
   await expect(
     page.getByRole("link", { name: "Terms", exact: true }),
@@ -107,13 +116,14 @@ test("legal pages are linked from the homepage, guides and app footer", async ({
 test("legal pages name the operator and the support, privacy and legal addresses, and every footer links to support", async ({
   page,
 }) => {
-  for (const path of ["/privacy", "/terms"]) {
+  for (const [path, updated] of [
+    ["/privacy", "October 19, 2026"],
+    ["/terms", "October 15, 2026"],
+  ]) {
     await page.goto(path);
     const main = page.getByRole("main");
     await expect(main).toContainText("RecurMail is run by Hassaan Saleem.");
-    await expect(page.locator("body")).toContainText(
-      "Last updated October 15, 2026",
-    );
+    await expect(page.locator("body")).toContainText(`Last updated ${updated}`);
     await expect(main).not.toContainText("placeholder");
     await expect(
       main.getByRole("link", { name: "support@recurmail.com" }),
