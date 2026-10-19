@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function PrivacyPage() {
   return (
-    <LegalDocument title="Privacy Policy">
+    <LegalDocument title="Privacy Policy" updated="October 19, 2026">
       <p>
         RecurMail helps you send recurring messages from your own Gmail account.
         This policy explains what information the service uses and how you can
@@ -56,6 +56,66 @@ export default function PrivacyPage() {
         so we can diagnose service failures. We do not use third-party product
         analytics.
       </p>
+      <h2 id="sharing">How Google user data is shared</h2>
+      <p>
+        Google user data means your Google account email address and identifier,
+        the Gmail access token, and the messages RecurMail sends through Gmail
+        for you. RecurMail does not sell Google user data. It does not use it
+        for advertising, and does not use it to train artificial intelligence or
+        machine learning models.
+      </p>
+      <p>RecurMail shares or transfers Google user data only in these cases:</p>
+      <ul>
+        <li>
+          With Google, to send each scheduled message through the Gmail API and
+          to revoke access when you disconnect Gmail or delete your account.
+        </li>
+        <li>
+          With Supabase, which stores the data, and Vercel, which hosts the web
+          app. They process it only to provide their service to RecurMail.
+        </li>
+        <li>
+          With Resend, only the Gmail address that lost access and a link to
+          reconnect it, so we can tell you when Gmail access stops working.
+        </li>
+        <li>When the law requires it, such as a valid court order.</li>
+        <li>
+          As part of a merger, acquisition or sale of RecurMail, only after
+          asking for your explicit consent first.
+        </li>
+      </ul>
+      <p>
+        Error reports sent to Sentry have email addresses, recipients, subjects
+        and message content removed before they leave RecurMail. No person reads
+        your messages unless you ask us to for support, it is needed to
+        investigate abuse or a security issue, or the law requires it.
+      </p>
+      <h2 id="protection">How we protect your data</h2>
+      <ul>
+        <li>
+          All connections between your browser, RecurMail, Supabase and Google
+          use HTTPS (TLS) encryption.
+        </li>
+        <li>
+          The Gmail refresh token is encrypted with AES-256-GCM using a key kept
+          outside the database. It is decrypted only on our servers to send your
+          messages, and is never sent to your browser.
+        </li>
+        <li>
+          Supabase encrypts stored data at rest. Database row-level security
+          limits each account to its own Gmail connection, schedules and send
+          history.
+        </li>
+        <li>Your sign-in session is kept in an encrypted, HTTP-only cookie.</li>
+        <li>
+          RecurMail requests only the <code>gmail.send</code> Gmail scope, so it
+          cannot read your mailbox.
+        </li>
+        <li>
+          Access to production systems is limited to the person who runs
+          RecurMail.
+        </li>
+      </ul>
       <h2>Service providers and retention</h2>
       <p>
         Supabase stores account and application data. Vercel hosts the web app.
