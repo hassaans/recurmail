@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 
 export default function TermsPage() {
   return (
-    <LegalDocument title="Terms of Service">
+    <LegalDocument title="Terms of Service" updated="October 15, 2026">
       <p>
         These terms cover your use of RecurMail. By using the service, you agree
         to them. If you do not agree, do not connect an account or create a

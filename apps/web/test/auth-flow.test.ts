@@ -26,7 +26,7 @@ function fixture() {
         client_id: "fake-google-client",
         redirect_uri: redirectUri,
         response_type: "code",
-        scope: "openid email profile",
+        scope: "openid email",
         state,
         code_challenge: challenge,
         code_challenge_method: "S256",
@@ -127,7 +127,7 @@ describe("server Supabase sign-in HTTP flow", () => {
       `${origin}/auth/callback`,
     );
     expect(url.searchParams.get("response_type")).toBe("code");
-    expect(url.searchParams.get("scope")).toBe("openid email profile");
+    expect(url.searchParams.get("scope")).toBe("openid email");
     expect(url.searchParams.get("code_challenge")).toBe(
       createHash("sha256").update(saved.verifier).digest("base64url"),
     );

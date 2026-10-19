@@ -26,7 +26,7 @@ describe("Google OIDC sign-in adapter", () => {
       "https://app.test/auth/callback",
     );
     expect(url.searchParams.get("response_type")).toBe("code");
-    expect(url.searchParams.get("scope")).toBe("openid email profile");
+    expect(url.searchParams.get("scope")).toBe("openid email");
     expect(url.searchParams.get("state")).toBe("random-state");
     expect(url.searchParams.get("code_challenge")).toBe("pkce-challenge");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
