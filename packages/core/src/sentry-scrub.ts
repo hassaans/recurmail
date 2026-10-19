@@ -1,6 +1,7 @@
 export type SentryEvent = Record<string, unknown>;
 
-const email = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+// Addresses also appear URL-encoded, as in the dashboard's `?email=owner%40gmail.com`.
+const email = /\b[A-Z0-9._%+-]+(?:@|%40|%2540)[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const privateContentKey =
   /^(?:body|body_text|body_html|subject|recipient|recipients|to|cc|bcc|email|raw|html|text|message|data|query_string|cookies?)$/i;
 const minifiedReactError = /^Minified React error #(\d+)\b/;

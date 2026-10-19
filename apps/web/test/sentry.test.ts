@@ -44,6 +44,30 @@ describe("Sentry event scrubbing", () => {
     expect(serialized).toContain("[Filtered]");
   });
 
+  it("removes URL-encoded addresses from page URLs and breadcrumbs", () => {
+    const event = beforeSend({
+      request: {
+        url: "https://recurmail.com/dashboard?gmail=connected&email=owner%40gmail.com",
+      },
+      breadcrumbs: [
+        {
+          category: "navigation",
+          data: {
+            from: "/dashboard?gmail=disconnected&email=first.last%2Btag%40example.co.uk",
+            to: "/settings?email=owner%2540gmail.com",
+          },
+        },
+      ],
+    });
+
+    const serialized = JSON.stringify(event);
+    for (const address of ["owner", "first.last", "gmail.com", "example.co.uk"])
+      expect(serialized).not.toContain(address);
+    expect(event.request.url).toBe(
+      "https://recurmail.com/dashboard?gmail=connected&email=[Filtered email]",
+    );
+  });
+
   it("keeps a React error's code but drops its arguments", () => {
     const event = beforeSend({
       exception: {
