@@ -44,7 +44,7 @@ export function createGoogleSignIn(config: {
         client_id: config.clientId,
         redirect_uri: redirectUri,
         response_type: "code",
-        scope: "openid email profile",
+        scope: "openid email",
         state,
         code_challenge: challenge,
         code_challenge_method: "S256",

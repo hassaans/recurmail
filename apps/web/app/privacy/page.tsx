@@ -17,11 +17,13 @@ export default function PrivacyPage() {
       </p>
       <h2>Google account and Gmail access</h2>
       <p>
-        RecurMail uses Google sign-in for your account. To send scheduled email,
-        you separately grant the Google scope{" "}
-        <code>https://www.googleapis.com/auth/gmail.send</code>. This scope lets
-        RecurMail send messages through Gmail. It does not allow RecurMail to
-        read your inbox, drafts or contacts.
+        RecurMail uses Google sign-in for your account. Sign-in asks Google only
+        for your email address, using the <code>openid</code> and{" "}
+        <code>email</code> scopes. RecurMail does not request your name or
+        profile photo. To send scheduled email, you separately grant the Google
+        scope <code>https://www.googleapis.com/auth/gmail.send</code>. This
+        scope lets RecurMail send messages through Gmail. It does not allow
+        RecurMail to read your inbox, drafts or contacts.
       </p>
       <p>
         RecurMail handles Google user data under the Google API Services User

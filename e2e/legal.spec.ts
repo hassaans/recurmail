@@ -22,6 +22,7 @@ test("privacy policy describes Gmail data, deletion and service providers", asyn
     "RecurMail does not sell Google user data.",
     "To, Cc and Bcc addresses you set",
     "AES-256-GCM",
+    "RecurMail does not request your name or profile photo.",
   ])
     await expect(page.locator("body")).toContainText(text);
   // Google's OAuth reviewers are sent straight to these two sections.

@@ -295,7 +295,7 @@ test("signed-in Connect Gmail exchanges PKCE, encrypts the row, then Disconnect 
   ).toBe(false);
   const connected = await snapshot();
   expect(connected.exchanges).toEqual([
-    { scope: "openid email profile", pkceVerified: true },
+    { scope: "openid email", pkceVerified: true },
     {
       scope: "openid email https://www.googleapis.com/auth/gmail.send",
       pkceVerified: true,

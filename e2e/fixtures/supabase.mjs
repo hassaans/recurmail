@@ -551,14 +551,14 @@ const server = createServer(async (req, res) => {
     }
     if (
       url.pathname === "/o/oauth2/v2/auth" &&
-      url.searchParams.get("scope") === "openid email profile"
+      url.searchParams.get("scope") === "openid email"
     ) {
       const scenario = scenarioFromCookie(req);
       const callback = new URL(url.searchParams.get("redirect_uri"));
       if (
         !scenario ||
         url.searchParams.get("client_id") !== "fake-google-client" ||
-        url.searchParams.get("scope") !== "openid email profile" ||
+        url.searchParams.get("scope") !== "openid email" ||
         url.searchParams.get("response_type") !== "code" ||
         url.searchParams.get("code_challenge_method") !== "S256" ||
         !url.searchParams.get("code_challenge") ||
@@ -688,7 +688,7 @@ const server = createServer(async (req, res) => {
         const idToken = `fake-google-id-token-${randomUUID()}`;
         idTokens.set(idToken, { user: grant.user, nonceHash: grant.nonceHash });
         grant.scenario.exchanges.push({
-          scope: "openid email profile",
+          scope: "openid email",
           pkceVerified: true,
         });
         return reply(200, { id_token: idToken });
