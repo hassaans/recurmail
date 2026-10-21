@@ -46,6 +46,7 @@ create index analytics_events_occurred_at_idx on public.analytics_events (occurr
 create index analytics_events_event_occurred_at_idx on public.analytics_events (event, occurred_at);
 create index analytics_events_anonymous_id_idx on public.analytics_events (anonymous_id);
 create index analytics_events_user_id_idx on public.analytics_events (user_id);
+create index analytics_events_ip_address_occurred_at_idx on public.analytics_events (ip_address, occurred_at);
 
 -- Where each user came from the first time their browser saw the site,
 -- copied from the browser's first-touch cookie when they sign up.
@@ -74,13 +75,84 @@ alter table public.user_attribution enable row level security;
 revoke all on public.analytics_events, public.user_attribution from public, anon, authenticated;
 grant all on public.analytics_events, public.user_attribution to service_role;
 
+-- Stores one event a browser sent to /api/events, unless the address it came
+-- from has used up its budget for the rolling window: at most p_max_events
+-- events, and at most p_max_browsers different browser ids, so a script
+-- cannot grow the table or invent visitors at will. Requests without an
+-- address are budgeted by their browser id. Claims for one address run one
+-- at a time behind a transaction-scoped advisory lock, so concurrent
+-- requests cannot overshoot. Returns whether the event was stored.
+create function public.record_client_event(
+  p_event jsonb,
+  p_window_seconds integer,
+  p_max_events integer,
+  p_max_browsers integer
+) returns boolean
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_row public.analytics_events := jsonb_populate_record(null::public.analytics_events, p_event);
+  v_since timestamptz := now() - make_interval(secs => p_window_seconds);
+  v_events integer;
+  v_browsers integer;
+  v_known boolean;
+begin
+  if v_row.ip_address is not null then
+    perform pg_advisory_xact_lock(hashtext('analytics_events'), hashtext(host(v_row.ip_address)));
+    select count(*), count(distinct anonymous_id), coalesce(bool_or(anonymous_id = v_row.anonymous_id), false)
+      into v_events, v_browsers, v_known
+      from public.analytics_events
+     where ip_address = v_row.ip_address
+       and occurred_at >= v_since;
+    if v_events >= p_max_events then
+      return false;
+    end if;
+    if v_row.anonymous_id is not null and not v_known and v_browsers >= p_max_browsers then
+      return false;
+    end if;
+  elsif v_row.anonymous_id is not null then
+    perform pg_advisory_xact_lock(hashtext('analytics_events'), hashtext(v_row.anonymous_id::text));
+    select count(*)
+      into v_events
+      from public.analytics_events
+     where anonymous_id = v_row.anonymous_id
+       and occurred_at >= v_since;
+    if v_events >= p_max_events then
+      return false;
+    end if;
+  else
+    return false;
+  end if;
+  insert into public.analytics_events (
+    event, anonymous_id, session_id, user_id, user_email, path, referrer_host, source,
+    utm_source, utm_medium, utm_campaign, utm_term, utm_content, device,
+    country, region, city, ip_address, user_agent, accept_language, is_bot, properties
+  ) values (
+    v_row.event, v_row.anonymous_id, v_row.session_id, v_row.user_id, v_row.user_email, v_row.path,
+    v_row.referrer_host, v_row.source, v_row.utm_source, v_row.utm_medium, v_row.utm_campaign,
+    v_row.utm_term, v_row.utm_content, v_row.device, v_row.country, v_row.region, v_row.city,
+    v_row.ip_address, v_row.user_agent, v_row.accept_language, coalesce(v_row.is_bot, false),
+    coalesce(v_row.properties, '{}'::jsonb)
+  );
+  return true;
+end;
+$$;
+
+revoke all on function public.record_client_event(jsonb, integer, integer, integer) from public, anon, authenticated;
+grant execute on function public.record_client_event(jsonb, integer, integer, integer) to service_role;
+
 -- The admin page's acquisition summary over the trailing p_days (1 to 3660).
 -- A visitor is a browser with a page view. Funnel steps count distinct
 -- people, identified by the browser where known and otherwise by the user,
--- so a server-recorded sign-up joins the browser that viewed the page.
--- Visitors by source take the browser's first page view in the window;
--- sign-ups by source take the attribution row of users who signed up in
--- the window. Events flagged as bots are left out. Every list is capped.
+-- so a server-recorded sign-up joins the browser that viewed the page. Each
+-- step counts only people who reached the step before it, earlier in the
+-- window, so no step can exceed the one above it. Sources follow one cohort,
+-- the window's visitors: each is credited to the source of their browser's
+-- first page view ever, and a sign-up counts for the source when that
+-- browser signed up in the window. Landing pages are the first page each
+-- browser saw in the window. Events flagged as bots are left out. Every
+-- list is capped.
 create or replace function public.get_analytics_summary(p_days integer default 30)
 returns jsonb
 language sql
@@ -97,31 +169,73 @@ as $$
     where e.occurred_at >= bounds.since and not e.is_bot
   ),
   people as (
-    select event, coalesce(anonymous_id::text, user_id::text) as person
+    select event, coalesce(anonymous_id::text, user_id::text) as person, occurred_at
     from events
     where anonymous_id is not null or user_id is not null
   ),
+  step_page_view as (
+    select person, min(occurred_at) as reached_at
+    from people
+    where event = 'page_view'
+    group by person
+  ),
+  step_signup_started as (
+    select p.person, min(p.occurred_at) as reached_at
+    from people p
+    join step_page_view s on s.person = p.person and p.occurred_at >= s.reached_at
+    where p.event = 'signup_started'
+    group by p.person
+  ),
+  step_signup_completed as (
+    select p.person, min(p.occurred_at) as reached_at
+    from people p
+    join step_signup_started s on s.person = p.person and p.occurred_at >= s.reached_at
+    where p.event = 'signup_completed'
+    group by p.person
+  ),
+  step_gmail_connected as (
+    select p.person, min(p.occurred_at) as reached_at
+    from people p
+    join step_signup_completed s on s.person = p.person and p.occurred_at >= s.reached_at
+    where p.event = 'gmail_connected'
+    group by p.person
+  ),
+  step_schedule_created as (
+    select p.person, min(p.occurred_at) as reached_at
+    from people p
+    join step_gmail_connected s on s.person = p.person and p.occurred_at >= s.reached_at
+    where p.event = 'schedule_created'
+    group by p.person
+  ),
   first_views as (
-    select distinct on (anonymous_id) anonymous_id, coalesce(source, 'direct') as source, path
+    select distinct on (anonymous_id) anonymous_id, path
     from events
     where event = 'page_view' and anonymous_id is not null
     order by anonymous_id, occurred_at, path
   ),
+  first_touches as (
+    select distinct on (e.anonymous_id) e.anonymous_id, coalesce(e.source, 'direct') as source
+    from public.analytics_events e
+    join first_views v on v.anonymous_id = e.anonymous_id
+    where e.event = 'page_view' and not e.is_bot
+    order by e.anonymous_id, e.occurred_at, e.path
+  ),
   signups as (
-    select a.user_id, a.first_source
+    select a.user_id, a.anonymous_id
     from public.user_attribution a, bounds
     where a.signed_up_at >= bounds.since
   ),
-  by_source as (
-    select source, count(*)::integer as visitors, 0 as signups from first_views group by source
-    union all
-    select first_source, 0, count(*)::integer from signups group by first_source
+  touch_counts as (
+    select t.source,
+      count(*)::integer as visitors,
+      count(*) filter (where exists (select 1 from signups s where s.anonymous_id = t.anonymous_id))::integer as signups
+    from first_touches t
+    group by t.source
   ),
   sources as (
-    select source, sum(visitors)::integer as visitors, sum(signups)::integer as signups
-    from by_source
-    group by source
-    order by sum(visitors) desc, sum(signups) desc, source
+    select source, visitors, signups
+    from touch_counts
+    order by visitors desc, signups desc, source
     limit 25
   ),
   landing_paths as (
@@ -152,11 +266,11 @@ as $$
     'visitors', (select count(*)::integer from first_views),
     'signups', (select count(*)::integer from signups),
     'funnel', jsonb_build_object(
-      'page_view', (select count(distinct person)::integer from people where event = 'page_view'),
-      'signup_started', (select count(distinct person)::integer from people where event = 'signup_started'),
-      'signup_completed', (select count(distinct person)::integer from people where event = 'signup_completed'),
-      'gmail_connected', (select count(distinct person)::integer from people where event = 'gmail_connected'),
-      'schedule_created', (select count(distinct person)::integer from people where event = 'schedule_created')
+      'page_view', (select count(*)::integer from step_page_view),
+      'signup_started', (select count(*)::integer from step_signup_started),
+      'signup_completed', (select count(*)::integer from step_signup_completed),
+      'gmail_connected', (select count(*)::integer from step_gmail_connected),
+      'schedule_created', (select count(*)::integer from step_schedule_created)
     ),
     'sources', coalesce((select jsonb_agg(jsonb_build_object('source', source, 'visitors', visitors, 'signups', signups) order by visitors desc, signups desc, source) from sources), '[]'::jsonb),
     'landing_paths', coalesce((select jsonb_agg(jsonb_build_object('path', path, 'visitors', visitors) order by visitors desc, path) from landing_paths), '[]'::jsonb),

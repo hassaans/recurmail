@@ -7,7 +7,11 @@ import {
   tokenIdentity,
 } from "../lib/analytics-server";
 import { encodeFirstTouchCookie } from "../lib/analytics-source";
-import type { AnalyticsStore, AttributionRow } from "../lib/analytics-store";
+import {
+  type AnalyticsStore,
+  type AttributionRow,
+  createAnalyticsStore,
+} from "../lib/analytics-store";
 import { createAuthHandlers, sessionCookie } from "../lib/auth-flow";
 import { describeSchedule } from "../lib/schedules";
 
@@ -36,6 +40,7 @@ afterEach(() => vi.restoreAllMocks());
 function store() {
   return {
     insertEvent: vi.fn(async (_row: AnalyticsEventRow) => {}),
+    recordClientEvent: vi.fn(async () => true),
     hasAttribution: vi.fn(async () => false),
     insertAttribution: vi.fn(async (_row: AttributionRow) => {}),
     summary: vi.fn(async () => ({})),
@@ -409,5 +414,68 @@ describe("sign-up and sign-in events", () => {
       "signed_out",
       { userId, userEmail: "owner@gmail.com" },
     );
+  });
+});
+
+describe("analytics store", () => {
+  function storeWith(reply: unknown, status = 200) {
+    const fetcher = vi.fn(
+      async (_url: string | URL | Request, _init?: RequestInit) =>
+        new Response(JSON.stringify(reply), { status }),
+    );
+    return {
+      fetcher,
+      store: createAnalyticsStore({
+        url: "https://db.test",
+        secretKey: "sb_secret_test",
+        fetcher,
+      }),
+    };
+  }
+  const row = {
+    event: "page_view",
+    anonymous_id: anonymousId,
+    session_id: sessionId,
+    user_id: null,
+    user_email: null,
+    path: "/",
+    referrer_host: null,
+    source: "direct",
+    device: "desktop",
+    ip_address: "198.51.100.7",
+    user_agent: browser,
+    accept_language: null,
+    country: null,
+    region: null,
+    city: null,
+    is_bot: false,
+    properties: {},
+  } satisfies AnalyticsEventRow;
+  const budget = { windowSeconds: 3600, maxEvents: 600, maxBrowsers: 30 };
+
+  it("records a browser event through record_client_event with its budget", async () => {
+    const f = storeWith(true);
+    await expect(f.store.recordClientEvent(row, budget)).resolves.toBe(true);
+    const [url, init] = f.fetcher.mock.calls[0];
+    expect(String(url)).toBe("https://db.test/rest/v1/rpc/record_client_event");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      p_event: row,
+      p_window_seconds: 3600,
+      p_max_events: 600,
+      p_max_browsers: 30,
+    });
+  });
+
+  it("reports a refused event and rejects anything but a boolean", async () => {
+    await expect(
+      storeWith(false).store.recordClientEvent(row, budget),
+    ).resolves.toBe(false);
+    await expect(
+      storeWith({ stored: true }).store.recordClientEvent(row, budget),
+    ).rejects.toThrow("record_client_event");
+    await expect(
+      storeWith({}, 500).store.recordClientEvent(row, budget),
+    ).rejects.toThrow("record_client_event");
   });
 });

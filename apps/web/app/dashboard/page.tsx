@@ -240,6 +240,7 @@ export default async function Dashboard({
             data-track="cta_click"
             data-track-location="dashboard"
             data-track-label="sign_in_with_google"
+            data-track-intent="login"
           >
             Sign in with Google
           </a>

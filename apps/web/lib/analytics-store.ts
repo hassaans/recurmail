@@ -20,8 +20,28 @@ export interface AttributionRow {
   signed_up_at: string;
 }
 
+/**
+ * How much one address may send to /api/events in a rolling window. A
+ * person reading the site sends a few events per page, so these leave room
+ * for a busy shared office while capping what a script can add.
+ */
+export interface ClientEventBudget {
+  windowSeconds: number;
+  maxEvents: number;
+  maxBrowsers: number;
+}
+
 export interface AnalyticsStore {
   insertEvent(row: AnalyticsEventRow): Promise<void>;
+  /**
+   * Stores a browser event through record_client_event, which refuses it
+   * once the sending address has spent its budget. Returns whether it was
+   * stored.
+   */
+  recordClientEvent(
+    row: AnalyticsEventRow,
+    budget: ClientEventBudget,
+  ): Promise<boolean>;
   hasAttribution(userId: string): Promise<boolean>;
   insertAttribution(row: AttributionRow): Promise<void>;
   /** The output of get_analytics_summary for the trailing number of days. */
@@ -91,6 +111,24 @@ export function createAnalyticsStore(config: {
   return {
     async insertEvent(row) {
       await request("analytics_events", {}, "POST", "insert_event", row);
+    },
+    async recordClientEvent(row, budget) {
+      const response = await request(
+        "rpc/record_client_event",
+        {},
+        "POST",
+        "record_client_event",
+        {
+          p_event: row,
+          p_window_seconds: budget.windowSeconds,
+          p_max_events: budget.maxEvents,
+          p_max_browsers: budget.maxBrowsers,
+        },
+      );
+      const stored: unknown = await response.json();
+      if (typeof stored !== "boolean")
+        throw new AnalyticsStorageError("record_client_event");
+      return stored;
     },
     async hasAttribution(userId) {
       const response = await request(

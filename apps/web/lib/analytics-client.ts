@@ -9,6 +9,7 @@ import {
 } from "./analytics-events";
 import {
   ANONYMOUS_ID_COOKIE,
+  cleanPath,
   deriveSource,
   encodeFirstTouchCookie,
   externalReferrerHost,
@@ -81,14 +82,16 @@ function setCookie(name: string, value: string, maxAge: number): void {
   }
 }
 
-function hasCookie(name: string): boolean {
+function cookie(name: string): string | null {
   try {
-    return document.cookie
-      .split(";")
-      .some((part) => part.trim().startsWith(`${name}=`));
+    for (const part of document.cookie.split(";")) {
+      const trimmed = part.trim();
+      if (trimmed.startsWith(`${name}=`)) return trimmed.slice(name.length + 1);
+    }
   } catch {
-    return false;
+    // Cookies blocked.
   }
+  return null;
 }
 
 function uuid(): string {
@@ -100,11 +103,27 @@ function uuid(): string {
   return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
 }
 
-/** The browser's random id, created on first use and mirrored to a cookie for the server. */
+// The id for this page load, so a browser that blocks local storage keeps
+// one id across its events instead of getting a new one per call.
+let pageAnonymousId: string | null = null;
+
+/**
+ * The browser's random id, created on first use and mirrored to a cookie for
+ * the server. Local storage is the record; without it the id this page
+ * already used, then the cookie from an earlier page, stand in.
+ */
 export function anonymousId(): string {
   const saved = read("localStorage", ANONYMOUS_ID_KEY);
-  const id = typeof saved === "string" && UUID.test(saved) ? saved : uuid();
-  if (id !== saved) write("localStorage", ANONYMOUS_ID_KEY, id);
+  if (typeof saved === "string" && UUID.test(saved)) {
+    pageAnonymousId = saved;
+    return saved;
+  }
+  const fromCookie = cookie(ANONYMOUS_ID_COOKIE);
+  const id =
+    pageAnonymousId ??
+    (fromCookie && UUID.test(fromCookie) ? fromCookie : uuid());
+  pageAnonymousId = id;
+  write("localStorage", ANONYMOUS_ID_KEY, id);
   return id;
 }
 
@@ -202,14 +221,14 @@ export function startVisit(): void {
       ...utm,
       source,
       referrer_host,
-      landing_path: location.pathname,
+      landing_path: cleanPath(location.pathname) ?? "/",
       first_seen_at: new Date(now).toISOString(),
     };
     write("localStorage", FIRST_TOUCH_KEY, first);
   }
   // The cookie is what the server reads at sign-up, so it is re-mirrored
   // whenever it has gone missing (cleared cookies, expiry).
-  if (!hasCookie(FIRST_TOUCH_COOKIE))
+  if (cookie(FIRST_TOUCH_COOKIE) === null)
     setCookie(FIRST_TOUCH_COOKIE, encodeFirstTouchCookie(first), YEAR);
   if (pageLanding.source !== "direct") {
     const { source, referrer_host, ...utm } = pageLanding;
@@ -273,8 +292,9 @@ function datasetProperties(element: HTMLElement): EventProperties {
 
 /**
  * The events a click stands for. An element (or ancestor) with `data-track`
- * names its own event. On top of that, a link to sign-in is always a
- * sign-up start, a mailto link a support click, a link to another site an
+ * names its own event. On top of that, a link to sign-in is a sign-up start
+ * unless it is marked `data-track-intent="login"` (a returning user signing
+ * back in), a mailto link a support click, a link to another site an
  * outbound click, and a link into the guides a guide click, so the markup
  * only has to label the calls to action.
  */
@@ -316,9 +336,10 @@ export function clickEvents(
       ]);
     return events;
   }
-  if (url.pathname === "/auth/signin")
-    events.push(["signup_started", properties]);
-  else if (url.pathname.startsWith("/guides/") && !explicit)
+  if (url.pathname === "/auth/signin") {
+    if (anchor.dataset.trackIntent !== "login")
+      events.push(["signup_started", properties]);
+  } else if (url.pathname.startsWith("/guides/") && !explicit)
     events.push(["guide_link_click", { ...properties, path: url.pathname }]);
   return events;
 }

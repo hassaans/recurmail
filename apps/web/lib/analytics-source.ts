@@ -5,6 +5,12 @@
 export const ANONYMOUS_ID_COOKIE = "rm_aid";
 export const SESSION_ID_COOKIE = "rm_sid";
 export const FIRST_TOUCH_COOKIE = "rm_ft";
+/**
+ * The longest rm_ft value the server reads, and so the longest the browser
+ * writes. A first touch with every field at its column limit encodes to
+ * about 3,040 characters; the cookie stays well under browsers' 4 KB limit.
+ */
+export const FIRST_TOUCH_COOKIE_MAX = 3400;
 export const UTM_FIELDS = [
   "utm_source",
   "utm_medium",
@@ -14,6 +20,15 @@ export const UTM_FIELDS = [
 ] as const;
 export type UtmField = (typeof UTM_FIELDS)[number];
 export type UtmFields = Partial<Record<UtmField, string>>;
+/** What an oversized first-touch cookie gives up first, least useful first. */
+const FIRST_TOUCH_TRIM_ORDER = [
+  "utm_content",
+  "utm_term",
+  "utm_campaign",
+  "utm_medium",
+  "landing_path",
+  "utm_source",
+] as const;
 
 export interface FirstTouch extends UtmFields {
   source: string;
@@ -272,7 +287,11 @@ export function sanitizeFirstTouch(value: unknown): FirstTouch | null {
 export function decodeFirstTouchCookie(
   value: string | null | undefined,
 ): FirstTouch | null {
-  if (!value || value.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(value))
+  if (
+    !value ||
+    value.length > FIRST_TOUCH_COOKIE_MAX ||
+    !/^[A-Za-z0-9_-]+$/.test(value)
+  )
     return null;
   try {
     const binary = atob(value.replace(/-/g, "+").replace(/_/g, "/"));
@@ -283,13 +302,31 @@ export function decodeFirstTouchCookie(
   }
 }
 
-/** Encodes a first touch for the rm_ft cookie (base64url JSON, UTF-8 safe). */
-export function encodeFirstTouchCookie(touch: FirstTouch): string {
-  const bytes = new TextEncoder().encode(JSON.stringify(touch));
+function base64urlJson(value: unknown): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary)
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
+}
+
+/**
+ * Encodes a first touch for the rm_ft cookie (base64url JSON, UTF-8 safe).
+ * The result never exceeds FIRST_TOUCH_COOKIE_MAX, so the server always
+ * accepts what the browser wrote. A record at every column limit fits as
+ * it is; only campaign text that grows past that once escaped or encoded
+ * as UTF-8 loses its least useful fields, then its landing path.
+ */
+export function encodeFirstTouchCookie(touch: FirstTouch): string {
+  const fitted: FirstTouch = { ...touch };
+  let encoded = base64urlJson(fitted);
+  for (const trim of FIRST_TOUCH_TRIM_ORDER) {
+    if (encoded.length <= FIRST_TOUCH_COOKIE_MAX) break;
+    if (trim === "landing_path") fitted.landing_path = "/";
+    else delete fitted[trim];
+    encoded = base64urlJson(fitted);
+  }
+  return encoded;
 }

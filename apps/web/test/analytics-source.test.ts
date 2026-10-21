@@ -5,6 +5,7 @@ import {
   deriveSource,
   encodeFirstTouchCookie,
   externalReferrerHost,
+  FIRST_TOUCH_COOKIE_MAX,
   type FirstTouch,
   normalizeHost,
   sanitizeFirstTouch,
@@ -156,6 +157,46 @@ describe("first-touch cookie", () => {
     );
   });
 
+  it("reads back a first touch with every field at its column limit", () => {
+    const longest: FirstTouch = {
+      utm_source: "s".repeat(255),
+      utm_medium: "m".repeat(255),
+      utm_campaign: "c".repeat(255),
+      utm_term: "t".repeat(255),
+      utm_content: "x".repeat(255),
+      // An unknown campaign source is kept as its own channel, cut to 64.
+      source: "s".repeat(64),
+      referrer_host: `${Array(4).fill("h".repeat(62)).join(".")}.com`,
+      landing_path: `/${"p".repeat(511)}`,
+      first_seen_at: touch.first_seen_at,
+    };
+    const encoded = encodeFirstTouchCookie(longest);
+    expect(encoded.length).toBeGreaterThan(2048);
+    expect(encoded.length).toBeLessThanOrEqual(FIRST_TOUCH_COOKIE_MAX);
+    expect(decodeFirstTouchCookie(encoded)).toEqual(longest);
+  });
+
+  it("trims campaign text that would not fit rather than writing a cookie the server drops", () => {
+    const oversized: FirstTouch = {
+      ...touch,
+      // Three UTF-8 bytes per character, at the 255 character column limit.
+      utm_medium: "\u6f22".repeat(255),
+      utm_campaign: "\u6f22".repeat(255),
+      utm_term: "\u6f22".repeat(255),
+      utm_content: "\u6f22".repeat(255),
+    };
+    const encoded = encodeFirstTouchCookie(oversized);
+    expect(encoded.length).toBeLessThanOrEqual(FIRST_TOUCH_COOKIE_MAX);
+    const decoded = decodeFirstTouchCookie(encoded);
+    expect(decoded).toMatchObject({
+      utm_source: "reddit",
+      source: "reddit",
+      referrer_host: "reddit.com",
+      landing_path: touch.landing_path,
+    });
+    expect(decoded?.utm_content).toBeUndefined();
+  });
+
   it("derives the source again rather than trusting the cookie", () => {
     const forged = encodeFirstTouchCookie({ ...touch, source: "paid" });
     expect(decodeFirstTouchCookie(forged)?.source).toBe("reddit");
@@ -173,7 +214,9 @@ describe("first-touch cookie", () => {
     expect(decodeFirstTouchCookie("not+base64url/")).toBeNull();
     expect(decodeFirstTouchCookie(btoa("not json"))).toBeNull();
     expect(decodeFirstTouchCookie(btoa("[1,2]").replace(/=/g, ""))).toBeNull();
-    expect(decodeFirstTouchCookie("a".repeat(3000))).toBeNull();
+    expect(
+      decodeFirstTouchCookie("a".repeat(FIRST_TOUCH_COOKIE_MAX + 1)),
+    ).toBeNull();
     expect(sanitizeFirstTouch({ source: "reddit" })).toBeNull();
     expect(
       sanitizeFirstTouch({ landing_path: "/", first_seen_at: "yesterday" }),

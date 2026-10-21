@@ -1101,12 +1101,10 @@ const server = createServer(async (req, res) => {
           schedule.status = "paused";
       return reply(204);
     }
-    if (url.pathname === "/rest/v1/analytics_events") {
-      // Mirrors the column checks from migration 0012. The user, when named,
-      // must exist; the summary never reads bot rows.
-      if (req.method !== "POST" || url.search !== "")
-        return reply(405, { error: "unsupported analytics method" });
-      const row = JSON.parse(await body(req));
+    // Mirrors the column checks from migration 0012. The user, when named,
+    // must exist; the summary never reads bot rows. Returns whether the row
+    // was stored; when it was not, the error has been answered.
+    const storeAnalyticsEvent = (row) => {
       if (
         !row ||
         Array.isArray(row) ||
@@ -1132,10 +1130,14 @@ const server = createServer(async (req, res) => {
           (!row.properties ||
             typeof row.properties !== "object" ||
             Array.isArray(row.properties)))
-      )
-        return reply(400, { error: "invalid analytics event" });
-      if (row.user_id && !findUser((user) => user.id === row.user_id))
-        return reply(409, { error: "analytics_events_user_id_fkey" });
+      ) {
+        reply(400, { error: "invalid analytics event" });
+        return false;
+      }
+      if (row.user_id && !findUser((user) => user.id === row.user_id)) {
+        reply(409, { error: "analytics_events_user_id_fkey" });
+        return false;
+      }
       analyticsEvents.push({
         id: randomUUID(),
         occurred_at: new Date().toISOString(),
@@ -1143,7 +1145,33 @@ const server = createServer(async (req, res) => {
         properties: {},
         ...row,
       });
-      return reply(201, undefined);
+      return true;
+    };
+    if (url.pathname === "/rest/v1/analytics_events") {
+      if (req.method !== "POST" || url.search !== "")
+        return reply(405, { error: "unsupported analytics method" });
+      if (storeAnalyticsEvent(JSON.parse(await body(req))))
+        reply(201, undefined);
+      return;
+    }
+    if (url.pathname === "/rest/v1/rpc/record_client_event") {
+      // The per-address budget itself is covered by the pgTAP tests; here
+      // the arguments must be well formed and the event is always stored,
+      // so the browser tests sharing 127.0.0.1 do not spend one budget.
+      if (req.method !== "POST")
+        return reply(405, { error: "unsupported record method" });
+      const args = JSON.parse(await body(req));
+      if (
+        !args ||
+        Object.keys(args).sort().join(",") !==
+          "p_event,p_max_browsers,p_max_events,p_window_seconds" ||
+        ![args.p_window_seconds, args.p_max_events, args.p_max_browsers].every(
+          (value) => Number.isInteger(value) && value > 0,
+        )
+      )
+        return reply(400, { error: "invalid record_client_event arguments" });
+      if (storeAnalyticsEvent(args.p_event)) reply(200, true);
+      return;
     }
     if (url.pathname === "/rest/v1/user_attribution") {
       if (req.method === "GET") {

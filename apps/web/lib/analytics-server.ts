@@ -17,7 +17,11 @@ import {
   FIRST_TOUCH_COOKIE,
   SESSION_ID_COOKIE,
 } from "./analytics-source";
-import { type AnalyticsStore, attributionFrom } from "./analytics-store";
+import {
+  type AnalyticsStore,
+  attributionFrom,
+  type ClientEventBudget,
+} from "./analytics-store";
 import { readCookie, sameOrigin } from "./http";
 
 /**
@@ -48,6 +52,13 @@ export interface ServerAnalytics {
 }
 
 const MAX_BODY = 8192;
+
+/** Per address, per hour: about 75 pages of reading, from up to 30 browsers. */
+export const CLIENT_EVENT_BUDGET: ClientEventBudget = {
+  windowSeconds: 3600,
+  maxEvents: 600,
+  maxBrowsers: 30,
+};
 
 /** The client address Vercel forwards: the first x-forwarded-for entry, else x-real-ip. */
 function clientAddress(request: Request): string | null {
@@ -175,14 +186,19 @@ export function tokenIdentity(
 /**
  * POST /api/events. Accepts one browser event per request from our own
  * pages, validates every field, attaches what only the server knows (the
- * user, the request details) and answers 204. Storage failures are logged
- * and still answered 204: the browser has nothing useful to do with them.
+ * user, the request details) and answers 204. The Origin header can be
+ * forged by a script, so the database also holds each address to a budget
+ * (CLIENT_EVENT_BUDGET) and an event past it is answered 429 unstored.
+ * Storage failures are logged and still answered 204: the browser has
+ * nothing useful to do with them.
  */
 export function createEventsHandler(config: {
   origin: string;
   store: AnalyticsStore;
   identity: (request: Request) => { id: string; email: string | null } | null;
+  budget?: ClientEventBudget;
 }) {
+  const budget = config.budget ?? CLIENT_EVENT_BUDGET;
   const noContent = () =>
     new Response(null, {
       status: 204,
@@ -218,12 +234,16 @@ export function createEventsHandler(config: {
     if (!event) return reject(400, "Invalid event");
     try {
       const user = config.identity(request);
-      await config.store.insertEvent({
-        ...event,
-        user_id: user?.id ?? null,
-        user_email: user?.email ?? null,
-        ...requestDetails(request),
-      });
+      const stored = await config.store.recordClientEvent(
+        {
+          ...event,
+          user_id: user?.id ?? null,
+          user_email: user?.email ?? null,
+          ...requestDetails(request),
+        },
+        budget,
+      );
+      if (!stored) return reject(429, "Too many events");
     } catch {
       console.error("[ERROR] analytics_insert_failed");
     }

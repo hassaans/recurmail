@@ -5,8 +5,11 @@ import {
   isBotUserAgent,
   validateClientEvent,
 } from "../lib/analytics-events";
-import { createEventsHandler } from "../lib/analytics-server";
-import type { AnalyticsStore } from "../lib/analytics-store";
+import {
+  CLIENT_EVENT_BUDGET,
+  createEventsHandler,
+} from "../lib/analytics-server";
+import type { AnalyticsStore, ClientEventBudget } from "../lib/analytics-store";
 
 const origin = "https://app.test";
 const anonymousId = "a0000000-0000-4000-8000-000000000001";
@@ -143,6 +146,9 @@ describe("POST /api/events", () => {
   function fixture(user: { id: string; email: string | null } | null = null) {
     const store = {
       insertEvent: vi.fn(async (_row: AnalyticsEventRow) => {}),
+      recordClientEvent: vi.fn(
+        async (_row: AnalyticsEventRow, _budget: ClientEventBudget) => true,
+      ),
       hasAttribution: vi.fn(async () => false),
       insertAttribution: vi.fn(async () => {}),
       summary: vi.fn(async () => ({})),
@@ -186,26 +192,43 @@ describe("POST /api/events", () => {
     );
     expect(response.status).toBe(204);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(f.store.insertEvent).toHaveBeenCalledWith({
-      event: "page_view",
-      anonymous_id: anonymousId,
-      session_id: sessionId,
-      user_id: null,
-      user_email: null,
-      path: "/guides/recurring-email-gmail",
-      referrer_host: "reddit.com",
-      source: "reddit",
-      utm_source: "reddit",
-      utm_medium: "social",
-      device: "desktop",
+    expect(f.store.recordClientEvent).toHaveBeenCalledWith(
+      {
+        event: "page_view",
+        anonymous_id: anonymousId,
+        session_id: sessionId,
+        user_id: null,
+        user_email: null,
+        path: "/guides/recurring-email-gmail",
+        referrer_host: "reddit.com",
+        source: "reddit",
+        utm_source: "reddit",
+        utm_medium: "social",
+        device: "desktop",
+        ip_address: "198.51.100.7",
+        user_agent: browser,
+        accept_language: "en-US,en;q=0.8",
+        country: "PK",
+        region: "PB",
+        city: "Lahore",
+        is_bot: false,
+        properties: {},
+      },
+      CLIENT_EVENT_BUDGET,
+    );
+    expect(f.store.insertEvent).not.toHaveBeenCalled();
+  });
+
+  it("answers 429 without storing when the address has spent its budget", async () => {
+    const f = fixture();
+    f.store.recordClientEvent.mockResolvedValueOnce(false);
+    const response = await f.handler(
+      request(payload(), { "x-forwarded-for": "198.51.100.7" }),
+    );
+    expect(response.status).toBe(429);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(f.store.recordClientEvent.mock.calls[0][0]).toMatchObject({
       ip_address: "198.51.100.7",
-      user_agent: browser,
-      accept_language: "en-US,en;q=0.8",
-      country: "PK",
-      region: "PB",
-      city: "Lahore",
-      is_bot: false,
-      properties: {},
     });
   });
 
@@ -220,7 +243,7 @@ describe("POST /api/events", () => {
         "x-forwarded-for": "not-an-address",
       }),
     );
-    expect(f.store.insertEvent.mock.calls[0][0]).toMatchObject({
+    expect(f.store.recordClientEvent.mock.calls[0][0]).toMatchObject({
       user_id: "00000000-0000-4000-8000-000000000051",
       user_email: "owner@gmail.com",
       country: null,
@@ -241,7 +264,7 @@ describe("POST /api/events", () => {
     });
     expect((await f.handler(noOrigin)).status).toBe(403);
     expect((await f.handler(request(undefined, {}, "GET"))).status).toBe(405);
-    expect(f.store.insertEvent).not.toHaveBeenCalled();
+    expect(f.store.recordClientEvent).not.toHaveBeenCalled();
   });
 
   it("keeps crawler traffic, flagged as a bot", async () => {
@@ -252,7 +275,7 @@ describe("POST /api/events", () => {
       }),
     );
     expect(response.status).toBe(204);
-    expect(f.store.insertEvent.mock.calls[0][0]).toMatchObject({
+    expect(f.store.recordClientEvent.mock.calls[0][0]).toMatchObject({
       is_bot: true,
       user_agent: "Mozilla/5.0 (compatible; bingbot/2.0)",
     });
@@ -272,12 +295,12 @@ describe("POST /api/events", () => {
         .status,
     ).toBe(400);
     expect((await f.handler(request("x".repeat(9000)))).status).toBe(413);
-    expect(f.store.insertEvent).not.toHaveBeenCalled();
+    expect(f.store.recordClientEvent).not.toHaveBeenCalled();
   });
 
   it("still answers 204 when storage fails, logging a safe event", async () => {
     const f = fixture();
-    f.store.insertEvent.mockRejectedValueOnce(
+    f.store.recordClientEvent.mockRejectedValueOnce(
       new Error("fake-secret upstream"),
     );
     const response = await f.handler(request(payload()));

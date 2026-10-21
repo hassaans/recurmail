@@ -289,6 +289,23 @@ test("the header call to action reports a click and a sign-up start, and signing
     user.events.filter((event) => event.event === "signup_completed"),
   ).toHaveLength(1);
   expect(user.attribution).toHaveLength(1);
+  // The dashboard's sign-in link is a returning user's, not a sign-up start.
+  const signIn = await storedEvent(
+    request,
+    `anonymous_id=${anonymousId}`,
+    "cta_click",
+    (event) => event.properties.location === "dashboard",
+  );
+  expect(signIn.properties).toEqual({
+    location: "dashboard",
+    label: "sign_in_with_google",
+    intent: "login",
+  });
+  expect(
+    (await stored(request, `anonymous_id=${anonymousId}`)).events.filter(
+      (event) => event.event === "signup_started",
+    ),
+  ).toHaveLength(1);
 
   // Nothing the browser sent carried an OAuth code or the user's address.
   expect(codes.length).toBeGreaterThan(0);
@@ -303,6 +320,46 @@ test("the header call to action reports a click and a sign-up start, and signing
   ).events.filter((event) => event.user_id === null);
   for (const code of codes)
     expect(JSON.stringify(browserRows)).not.toContain(code);
+});
+
+test("a browser that blocks local storage keeps one id across its events and pages", async ({
+  page,
+  context,
+  request,
+}) => {
+  await context.addInitScript(() => {
+    Storage.prototype.getItem = () => null;
+    Storage.prototype.setItem = () => {
+      throw new DOMException("blocked", "SecurityError");
+    };
+  });
+  const bodies = collectEventBodies(page);
+  await page.goto("/");
+  await expect.poll(() => bodies.length).toBeGreaterThan(0);
+  const anonymousId = (await context.cookies(appOrigin)).find(
+    (cookie) => cookie.name === "rm_aid",
+  )?.value;
+  expect(anonymousId).toMatch(/^[0-9a-f-]{36}$/);
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await storedEvent(
+    request,
+    `anonymous_id=${anonymousId}`,
+    "scroll_depth",
+    (event) => event.properties.depth === 100,
+  );
+  await page.goto("/guides/recurring-email-gmail");
+  await storedEvent(
+    request,
+    `anonymous_id=${anonymousId}`,
+    "page_view",
+    (event) => event.path === "/guides/recurring-email-gmail",
+  );
+  const ids = new Set(
+    bodies.map(
+      (body) => (JSON.parse(body) as { anonymous_id: string }).anonymous_id,
+    ),
+  );
+  expect([...ids]).toEqual([anonymousId]);
 });
 
 test("the events route accepts only our own pages and keeps crawler traffic flagged", async ({
