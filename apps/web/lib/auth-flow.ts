@@ -1,8 +1,9 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
+import { type ServerAnalytics, tokenIdentity } from "./analytics-server";
 import { decryptRefreshToken, encryptRefreshToken } from "./crypto";
 import { cookieHeader, readCookie, redirectResponse, sameOrigin } from "./http";
-import type { Session } from "./supabase-auth";
+import type { Session, SignedInUser } from "./supabase-auth";
 
 const stateCookie = "rm_auth_state";
 export const SESSION_COOKIE = "rm_session";
@@ -10,8 +11,11 @@ export const SESSION_COOKIE = "rm_session";
 interface SignInAuth {
   exchangeIdToken(idToken: string, nonce: string): Promise<Session>;
   refresh(refreshToken: string): Promise<Session>;
-  getUser(accessToken: string): Promise<{ id: string; email: string } | null>;
+  getUser(accessToken: string): Promise<SignedInUser | null>;
 }
+
+/** How recently Supabase must have created the user for a sign-in to count as their sign-up. */
+const NEW_USER_WINDOW = 10 * 60_000;
 
 interface GoogleSignIn {
   authorizationUrl(input: {
@@ -69,11 +73,31 @@ export function createAuthHandlers(config: {
   key: string;
   auth: SignInAuth;
   google: GoogleSignIn;
+  analytics?: ServerAnalytics;
   now?: () => number;
 }) {
   const now = config.now ?? Date.now;
   function failure() {
     return redirectResponse(config.origin, "/dashboard?auth=failed");
+  }
+  // A sign-in is a sign-up when the user has no attribution row yet and
+  // Supabase created the account moments ago. Users from before analytics
+  // existed get an attribution row dated from their creation, but no
+  // sign-up event, the first time they come back.
+  async function recordSignIn(request: Request, user: SignedInUser) {
+    if (!config.analytics) return;
+    const createdAt = user.createdAt ? Date.parse(user.createdAt) : null;
+    const recent = createdAt === null || now() - createdAt < NEW_USER_WINDOW;
+    const created = await config.analytics.recordSignup(
+      request,
+      user,
+      user.createdAt,
+    );
+    await config.analytics.track(
+      request,
+      created && recent ? "signup_completed" : "login_completed",
+      { userId: user.id, userEmail: user.email },
+    );
   }
   function clearState(response: Response) {
     response.headers.append(
@@ -148,8 +172,8 @@ export function createAuthHandlers(config: {
           saved.verifier,
         );
         const session = await config.auth.exchangeIdToken(idToken, saved.nonce);
-        if (!(await config.auth.getUser(session.accessToken)))
-          return clearState(failure());
+        const user = await config.auth.getUser(session.accessToken);
+        if (!user) return clearState(failure());
         const response = clearState(
           redirectResponse(config.origin, "/dashboard"),
         );
@@ -157,6 +181,7 @@ export function createAuthHandlers(config: {
           "Set-Cookie",
           sessionCookie(session, config.key, config.origin),
         );
+        await recordSignIn(request, user);
         return response;
       } catch {
         console.error("[ERROR] auth_callback_failed");
@@ -200,6 +225,11 @@ export function createAuthHandlers(config: {
         "Set-Cookie",
         cookieHeader(SESSION_COOKIE, "", config.origin, 0),
       );
+      const user = tokenIdentity(readSession(request, config.key)?.accessToken);
+      await config.analytics?.track(request, "signed_out", {
+        userId: user?.id,
+        userEmail: user?.email,
+      });
       return response;
     },
   };

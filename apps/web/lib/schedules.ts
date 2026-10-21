@@ -4,6 +4,7 @@ import {
   dailyLimitCheck,
   nextOccurrence,
 } from "@recurmail/core";
+import type { ServerAnalytics } from "./analytics-server";
 import { isConnectionId, type PublicConnection } from "./connections";
 import type { Authenticate, Identity } from "./gmail-flow";
 import { sameOrigin } from "./http";
@@ -281,6 +282,31 @@ export function senderFor(
   return connection;
 }
 
+/**
+ * What an event may say about a schedule: how often it repeats and roughly
+ * how many people it reaches. Never the recipients, subject or body.
+ */
+export function describeSchedule(
+  schedule: Pick<ScheduleInput, "rrule" | "to" | "cc" | "bcc" | "body_html">,
+): Record<string, string | boolean> {
+  const recipients =
+    schedule.to.length + schedule.cc.length + schedule.bcc.length;
+  return {
+    frequency: (
+      /(?:^|[;:\n])FREQ=([A-Z]+)/.exec(schedule.rrule)?.[1] ?? "unknown"
+    ).toLowerCase(),
+    recipients:
+      recipients <= 1
+        ? "1"
+        : recipients <= 5
+          ? "2-5"
+          : recipients <= 20
+            ? "6-20"
+            : "21+",
+    html: schedule.body_html !== null,
+  };
+}
+
 export function scheduleJson(body: unknown, status = 200): Response {
   return Response.json(body, {
     status,
@@ -292,10 +318,13 @@ export function createScheduleHandlers(config: {
   origin: string;
   authenticate: Authenticate;
   store: ScheduleStore;
+  analytics?: ServerAnalytics;
   now?: () => number;
 }) {
   const now = config.now ?? Date.now;
   const store = config.store;
+  const track: ServerAnalytics["track"] = async (request, event, input) =>
+    config.analytics?.track(request, event, input);
 
   async function run(
     operation: string,
@@ -489,6 +518,14 @@ export function createScheduleHandlers(config: {
           },
           identity.accessToken,
         );
+        await track(request, "schedule_created", {
+          userId: identity.user.id,
+          userEmail: identity.user.email,
+          properties: {
+            ...describeSchedule(schedule),
+            source: schedule.source,
+          },
+        });
         return forecast(identity, schedule, accounts, at, 201);
       }),
     patch: (request: Request, id: string) =>
@@ -530,18 +567,27 @@ export function createScheduleHandlers(config: {
           ...(ruleChanged ? { next_send_at: nextSend(normalized, at) } : {}),
           ...(restart ? { status: "active" as const } : {}),
         };
-        return forecast(
-          identity,
-          await update(identity, id, changes),
-          accounts,
-          at,
-        );
+        const schedule = await update(identity, id, changes);
+        await track(request, "schedule_updated", {
+          userId: identity.user.id,
+          userEmail: identity.user.email,
+          properties: {
+            ...describeSchedule(schedule),
+            fields: fields.join(","),
+            restarted: restart,
+          },
+        });
+        return forecast(identity, schedule, accounts, at);
       }),
     delete: (request: Request, id: string) =>
       run("delete", request, true, async (identity) => {
         await owned(identity, id);
         if (!(await store.delete(identity.user.id, id, identity.accessToken)))
           throw new RequestError(404, "not_found", "Schedule not found");
+        await track(request, "schedule_deleted", {
+          userId: identity.user.id,
+          userEmail: identity.user.email,
+        });
         return new Response(null, {
           status: 204,
           headers: { "Cache-Control": "no-store" },
@@ -553,6 +599,10 @@ export function createScheduleHandlers(config: {
         const schedule = await update(identity, id, {
           status: "paused",
           updated_at: new Date(now()).toISOString(),
+        });
+        await track(request, "schedule_paused", {
+          userId: identity.user.id,
+          userEmail: identity.user.email,
         });
         return scheduleJson({ schedule });
       }),
@@ -567,14 +617,25 @@ export function createScheduleHandlers(config: {
           next_send_at: nextSend(original, at),
           updated_at: at.toISOString(),
         });
+        await track(request, "schedule_resumed", {
+          userId: identity.user.id,
+          userEmail: identity.user.email,
+        });
         return forecast(identity, schedule, accounts, at);
       }),
     pauseAll: (request: Request) =>
-      run("pauseAll", request, true, async (identity) =>
-        scheduleJson({
-          paused: await store.pauseAll(identity.user.id, identity.accessToken),
-        }),
-      ),
+      run("pauseAll", request, true, async (identity) => {
+        const paused = await store.pauseAll(
+          identity.user.id,
+          identity.accessToken,
+        );
+        await track(request, "schedules_paused_all", {
+          userId: identity.user.id,
+          userEmail: identity.user.email,
+          properties: { paused },
+        });
+        return scheduleJson({ paused });
+      }),
     history: (request: Request, id: string) =>
       run("history", request, false, async (identity) => {
         await owned(identity, id);

@@ -108,6 +108,8 @@ jobs:
         run: supabase test db supabase/tests/test-send.test.sql
       - name: Run multiple Gmail account database tests
         run: supabase test db supabase/tests/multiple-accounts.test.sql
+      - name: Run analytics database tests
+        run: supabase test db supabase/tests/analytics.test.sql
       - name: Verify concurrent sender claims
         run: bash supabase/tests/sender-concurrency.sh
       - name: Set up Deno

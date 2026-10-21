@@ -51,6 +51,58 @@ const scheduleColumns = [
 const scenarios = new Map();
 const codes = new Map();
 const idTokens = new Map();
+// Analytics rows are global: most come from anonymous browsers that belong
+// to no scenario. Tests pick theirs out by browser id or user id.
+const analyticsEvents = [];
+const userAttribution = new Map();
+const eventColumns = [
+  "event",
+  "anonymous_id",
+  "session_id",
+  "user_id",
+  "user_email",
+  "path",
+  "referrer_host",
+  "source",
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "device",
+  "ip_address",
+  "user_agent",
+  "accept_language",
+  "country",
+  "region",
+  "city",
+  "is_bot",
+  "properties",
+];
+const attributionColumns = [
+  "user_id",
+  "anonymous_id",
+  "user_email",
+  "signup_ip",
+  "signup_user_agent",
+  "first_source",
+  "first_referrer_host",
+  "first_utm_source",
+  "first_utm_medium",
+  "first_utm_campaign",
+  "first_utm_term",
+  "first_utm_content",
+  "first_landing_path",
+  "first_seen_at",
+  "signed_up_at",
+];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const nullableUuid = (value) =>
+  value === null || value === undefined || UUID.test(value);
+const nullableText = (value, max) =>
+  value === null ||
+  value === undefined ||
+  (typeof value === "string" && value.length <= max);
 
 function newUser(domain = "gmail.com") {
   const id = randomUUID();
@@ -346,6 +398,23 @@ const server = createServer(async (req, res) => {
   };
   try {
     if (url.pathname === "/health") return reply(200, { ready: true });
+    if (url.pathname === "/__test/analytics" && req.method === "GET") {
+      // Every stored row for one browser or one user.
+      const anonymousId = url.searchParams.get("anonymous_id");
+      const userId = url.searchParams.get("user_id");
+      return reply(200, {
+        events: analyticsEvents.filter(
+          (row) =>
+            (anonymousId && row.anonymous_id === anonymousId) ||
+            (userId && row.user_id === userId),
+        ),
+        attribution: [...userAttribution.values()].filter(
+          (row) =>
+            (anonymousId && row.anonymous_id === anonymousId) ||
+            (userId && row.user_id === userId),
+        ),
+      });
+    }
     if (url.pathname === "/__test/scenarios" && req.method === "POST") {
       const {
         connections,
@@ -1031,6 +1100,200 @@ const server = createServer(async (req, res) => {
         )
           schedule.status = "paused";
       return reply(204);
+    }
+    // Mirrors the column checks from migration 0012. The user, when named,
+    // must exist; the summary never reads bot rows. Returns whether the row
+    // was stored; when it was not, the error has been answered.
+    const storeAnalyticsEvent = (row) => {
+      if (
+        !row ||
+        Array.isArray(row) ||
+        Object.keys(row).some((field) => !eventColumns.includes(field)) ||
+        typeof row.event !== "string" ||
+        !/^[a-z][a-z0-9_]{1,47}$/.test(row.event) ||
+        !nullableUuid(row.anonymous_id) ||
+        !nullableUuid(row.session_id) ||
+        !nullableUuid(row.user_id) ||
+        !nullableText(row.user_email, 320) ||
+        !nullableText(row.path, 512) ||
+        !nullableText(row.referrer_host, 255) ||
+        !nullableText(row.source, 64) ||
+        !nullableText(row.user_agent, 1024) ||
+        !nullableText(row.accept_language, 255) ||
+        !nullableText(row.region, 255) ||
+        !nullableText(row.city, 255) ||
+        (row.device != null &&
+          !["mobile", "tablet", "desktop"].includes(row.device)) ||
+        (row.country != null && !/^[A-Z]{2}$/.test(row.country)) ||
+        (row.is_bot !== undefined && typeof row.is_bot !== "boolean") ||
+        (row.properties !== undefined &&
+          (!row.properties ||
+            typeof row.properties !== "object" ||
+            Array.isArray(row.properties)))
+      ) {
+        reply(400, { error: "invalid analytics event" });
+        return false;
+      }
+      if (row.user_id && !findUser((user) => user.id === row.user_id)) {
+        reply(409, { error: "analytics_events_user_id_fkey" });
+        return false;
+      }
+      analyticsEvents.push({
+        id: randomUUID(),
+        occurred_at: new Date().toISOString(),
+        is_bot: false,
+        properties: {},
+        ...row,
+      });
+      return true;
+    };
+    if (url.pathname === "/rest/v1/analytics_events") {
+      if (req.method !== "POST" || url.search !== "")
+        return reply(405, { error: "unsupported analytics method" });
+      if (storeAnalyticsEvent(JSON.parse(await body(req))))
+        reply(201, undefined);
+      return;
+    }
+    if (url.pathname === "/rest/v1/rpc/record_client_event") {
+      // The per-address budget itself is covered by the pgTAP tests; here
+      // the arguments must be well formed and the event is always stored,
+      // so the browser tests sharing 127.0.0.1 do not spend one budget.
+      if (req.method !== "POST")
+        return reply(405, { error: "unsupported record method" });
+      const args = JSON.parse(await body(req));
+      if (
+        !args ||
+        Object.keys(args).sort().join(",") !==
+          "p_event,p_max_browsers,p_max_events,p_window_seconds" ||
+        ![args.p_window_seconds, args.p_max_events, args.p_max_browsers].every(
+          (value) => Number.isInteger(value) && value > 0,
+        )
+      )
+        return reply(400, { error: "invalid record_client_event arguments" });
+      if (storeAnalyticsEvent(args.p_event)) reply(200, true);
+      return;
+    }
+    if (url.pathname === "/rest/v1/user_attribution") {
+      if (req.method === "GET") {
+        const filter = url.searchParams.get("user_id");
+        if (
+          !filter?.startsWith("eq.") ||
+          url.searchParams.get("select") !== "user_id"
+        )
+          return reply(400, { error: "unsupported attribution query" });
+        const row = userAttribution.get(filter.slice("eq.".length));
+        return reply(200, row ? [{ user_id: row.user_id }] : []);
+      }
+      if (req.method !== "POST" || url.search !== "")
+        return reply(405, { error: "unsupported attribution method" });
+      const row = JSON.parse(await body(req));
+      if (
+        !row ||
+        Array.isArray(row) ||
+        Object.keys(row).some((field) => !attributionColumns.includes(field)) ||
+        !UUID.test(row.user_id ?? "") ||
+        !nullableUuid(row.anonymous_id) ||
+        typeof row.first_source !== "string" ||
+        row.first_source.length > 64 ||
+        typeof row.signed_up_at !== "string"
+      )
+        return reply(400, { error: "invalid attribution row" });
+      if (!findUser((user) => user.id === row.user_id))
+        return reply(409, { error: "user_attribution_user_id_fkey" });
+      if (userAttribution.has(row.user_id))
+        return reply(409, { error: "user_attribution_pkey" });
+      userAttribution.set(row.user_id, row);
+      return reply(201, undefined);
+    }
+    if (url.pathname === "/rest/v1/rpc/get_analytics_summary") {
+      // A shape-faithful stand-in for the summary in migration 0012.
+      if (req.method !== "POST")
+        return reply(405, { error: "unsupported summary method" });
+      const args = JSON.parse(await body(req));
+      const days = Math.max(1, Math.min(args.p_days ?? 30, 400));
+      const since = Date.now() - days * 86400000;
+      const rows = analyticsEvents.filter(
+        (row) => !row.is_bot && Date.parse(row.occurred_at) >= since,
+      );
+      const person = (row) => row.anonymous_id ?? row.user_id;
+      const distinct = (event) =>
+        new Set(
+          rows
+            .filter((row) => row.event === event)
+            .map(person)
+            .filter(Boolean),
+        ).size;
+      const firstViews = new Map();
+      for (const row of rows)
+        if (
+          row.event === "page_view" &&
+          row.anonymous_id &&
+          !firstViews.has(row.anonymous_id)
+        )
+          firstViews.set(row.anonymous_id, row);
+      const signups = [...userAttribution.values()].filter(
+        (row) => Date.parse(row.signed_up_at) >= since,
+      );
+      const sources = new Map();
+      for (const row of firstViews.values()) {
+        const entry = sources.get(row.source ?? "direct") ?? {
+          visitors: 0,
+          signups: 0,
+        };
+        entry.visitors += 1;
+        sources.set(row.source ?? "direct", entry);
+      }
+      for (const row of signups) {
+        const entry = sources.get(row.first_source) ?? {
+          visitors: 0,
+          signups: 0,
+        };
+        entry.signups += 1;
+        sources.set(row.first_source, entry);
+      }
+      const tally = (values) => {
+        const counts = new Map();
+        for (const value of values)
+          counts.set(value, (counts.get(value) ?? 0) + 1);
+        return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+      };
+      return reply(200, {
+        days,
+        visitors: firstViews.size,
+        signups: signups.length,
+        funnel: Object.fromEntries(
+          [
+            "page_view",
+            "signup_started",
+            "signup_completed",
+            "gmail_connected",
+            "schedule_created",
+          ].map((event) => [event, distinct(event)]),
+        ),
+        sources: [...sources.entries()].map(([source, entry]) => ({
+          source,
+          ...entry,
+        })),
+        landing_paths: tally(
+          [...firstViews.values()].map((row) => row.path).filter(Boolean),
+        )
+          .slice(0, 10)
+          .map(([path, visitors]) => ({ path, visitors })),
+        referrers: tally(
+          [
+            ...new Set(
+              rows
+                .filter((row) => row.event === "page_view" && row.referrer_host)
+                .map((row) => `${row.referrer_host}|${row.anonymous_id}`),
+            ),
+          ].map((key) => key.split("|")[0]),
+        )
+          .slice(0, 10)
+          .map(([host, visitors]) => ({ host, visitors })),
+        events: tally(rows.map((row) => row.event))
+          .slice(0, 50)
+          .map(([event, count]) => ({ event, count })),
+      });
     }
     if (url.pathname === "/rest/v1/test_sends") {
       // Service-role only: the app never reads this table as the user. The
