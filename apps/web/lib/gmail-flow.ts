@@ -135,9 +135,13 @@ export function createGmailHandlers(config: {
     async callback(request: Request): Promise<Response> {
       let token: string | undefined;
       let email: string | undefined;
+      // Kept outside the try so a failure after sign-in is checked is still
+      // recorded against the account.
+      let user: SignedInUser | undefined;
       try {
         const identity = await config.authenticate(request);
         if (!identity) return clearState(signIn());
+        user = identity.user;
         const envelope = readCookie(request, stateCookie);
         if (!envelope) return clearState(result("failed"));
         // The envelope is bound to the signed-in user id through the cipher's
@@ -212,6 +216,8 @@ export function createGmailHandlers(config: {
           status = "address_in_use";
         if (status === "failed") console.error("[ERROR] gmail_callback_failed");
         await track(request, "gmail_connect_failed", {
+          userId: user?.id ?? null,
+          userEmail: user?.email ?? null,
           properties: { reason: status },
         });
         // A grant that could not be persisted must not remain active at Google.

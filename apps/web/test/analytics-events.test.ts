@@ -8,6 +8,7 @@ import {
 import {
   CLIENT_EVENT_BUDGET,
   createEventsHandler,
+  readLimitedText,
 } from "../lib/analytics-server";
 import type { AnalyticsStore, ClientEventBudget } from "../lib/analytics-store";
 
@@ -295,6 +296,10 @@ describe("POST /api/events", () => {
         .status,
     ).toBe(400);
     expect((await f.handler(request("x".repeat(9000)))).status).toBe(413);
+    expect(
+      (await f.handler(request(payload(), { "Content-Length": "50000000" })))
+        .status,
+    ).toBe(413);
     expect(f.store.recordClientEvent).not.toHaveBeenCalled();
   });
 
@@ -311,5 +316,68 @@ describe("POST /api/events", () => {
     expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain(
       "fake-secret",
     );
+  });
+});
+
+describe("reading a bounded body", () => {
+  /** A body that never ends, counting how many chunks were pulled from it. */
+  function endless(chunk: Uint8Array) {
+    const stream = {
+      pulls: 0,
+      cancelled: false,
+      body: null as unknown as ReadableStream<Uint8Array>,
+    };
+    stream.body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        stream.pulls += 1;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        stream.cancelled = true;
+      },
+    });
+    return stream;
+  }
+  const post = (body: BodyInit, headers: Record<string, string> = {}) =>
+    new Request(`${origin}/api/events`, {
+      method: "POST",
+      body,
+      headers,
+      duplex: "half",
+    } as RequestInit);
+
+  it("stops reading an undeclared body as soon as it passes the limit", async () => {
+    const stream = endless(new Uint8Array(1024).fill(120));
+    await expect(readLimitedText(post(stream.body), 8192)).resolves.toBeNull();
+    expect(stream.pulls).toBeLessThanOrEqual(12);
+    expect(stream.cancelled).toBe(true);
+  });
+
+  it("refuses a declared length over the limit without reading the body", async () => {
+    const stream = endless(new Uint8Array(1024));
+    await expect(
+      readLimitedText(post(stream.body, { "Content-Length": "9000" }), 8192),
+    ).resolves.toBeNull();
+    expect(stream.pulls).toBeLessThanOrEqual(1);
+  });
+
+  it("returns a body within the limit, multi-byte text intact", async () => {
+    const text = JSON.stringify({
+      campaign: "lancement d'\u00e9t\u00e9 \u6f22",
+    });
+    await expect(readLimitedText(post(text), 8192)).resolves.toBe(text);
+    const bytes = new TextEncoder().encode(text);
+    // Split inside a multi-byte character.
+    const split = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.slice(0, bytes.length - 3));
+        controller.enqueue(bytes.slice(bytes.length - 3));
+        controller.close();
+      },
+    });
+    await expect(readLimitedText(post(split), 8192)).resolves.toBe(text);
+    await expect(
+      readLimitedText(post("x".repeat(8193)), 8192),
+    ).resolves.toBeNull();
   });
 });

@@ -322,7 +322,7 @@ test("the header call to action reports a click and a sign-up start, and signing
     expect(JSON.stringify(browserRows)).not.toContain(code);
 });
 
-test("a browser that blocks local storage keeps one id across its events and pages", async ({
+test("a browser that blocks storage keeps one id and one session across its events and pages", async ({
   page,
   context,
   request,
@@ -354,12 +354,20 @@ test("a browser that blocks local storage keeps one id across its events and pag
     "page_view",
     (event) => event.path === "/guides/recurring-email-gmail",
   );
-  const ids = new Set(
-    bodies.map(
-      (body) => (JSON.parse(body) as { anonymous_id: string }).anonymous_id,
-    ),
+  const sent = bodies.map(
+    (body) => JSON.parse(body) as { anonymous_id: string; session_id: string },
   );
-  expect([...ids]).toEqual([anonymousId]);
+  expect([...new Set(sent.map((event) => event.anonymous_id))]).toEqual([
+    anonymousId,
+  ]);
+  // The visit is one session too, carried by the rm_sid cookie.
+  const sessionId = (await context.cookies(appOrigin)).find(
+    (cookie) => cookie.name === "rm_sid",
+  )?.value;
+  expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
+  expect([...new Set(sent.map((event) => event.session_id))]).toEqual([
+    sessionId,
+  ]);
 });
 
 test("the events route accepts only our own pages and keeps crawler traffic flagged", async ({

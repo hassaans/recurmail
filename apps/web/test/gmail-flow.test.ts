@@ -132,6 +132,10 @@ function fixture() {
     accessToken: "fake-access",
   }));
   const now = vi.fn(() => 1000);
+  const analytics = {
+    track: vi.fn(async () => {}),
+    recordSignup: vi.fn(async () => false),
+  };
   const handlers = createGmailHandlers({
     origin,
     key,
@@ -139,6 +143,7 @@ function fixture() {
     google,
     authenticate,
     now,
+    analytics,
   });
   const start = async (id?: string) => {
     const response = await handlers.connect(connectRequest(id));
@@ -171,6 +176,7 @@ function fixture() {
     google,
     authenticate,
     now,
+    analytics,
     schedules,
     connections,
     connection: (id = ids.personal) =>
@@ -495,6 +501,16 @@ describe("Gmail connection HTTP flow with fake providers and persistence", () =>
     expect(f.google.revoke).toHaveBeenCalledWith("fake-gmail-refresh");
     expect(console.error).not.toHaveBeenCalledWith(
       "[ERROR] gmail_callback_failed",
+    );
+    // The failure is recorded against the signed-in account.
+    expect(f.analytics.track).toHaveBeenCalledWith(
+      expect.any(Request),
+      "gmail_connect_failed",
+      {
+        userId: owner.id,
+        userEmail: owner.email,
+        properties: { reason: "limit" },
+      },
     );
   });
 

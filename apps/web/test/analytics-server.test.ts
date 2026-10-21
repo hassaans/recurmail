@@ -467,6 +467,44 @@ describe("analytics store", () => {
     });
   });
 
+  it("gives up on a database that never answers, so tracking cannot hold up a response", async () => {
+    const signals: AbortSignal[] = [];
+    // Answers only by failing once the request's signal aborts.
+    const fetcher = vi.fn(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (!signal) return;
+          signals.push(signal);
+          signal.addEventListener("abort", () => reject(signal.reason));
+        }),
+    );
+    const slow = createAnalyticsStore({
+      url: "https://db.test",
+      secretKey: "sb_secret_test",
+      fetcher,
+      timeoutMs: 20,
+      summaryTimeoutMs: 40,
+    });
+    await expect(slow.insertEvent(row)).rejects.toThrow();
+    await expect(slow.recordClientEvent(row, budget)).rejects.toThrow();
+    await expect(slow.summary(30)).rejects.toThrow();
+    expect(signals).toHaveLength(3);
+    const analytics = createServerAnalytics({ origin, store: slow });
+    const started = Date.now();
+    await expect(
+      analytics.track(
+        new Request(`${origin}/api/schedules`, { method: "POST" }),
+        "schedule_created",
+        { userId, userEmail: user.email },
+      ),
+    ).resolves.toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(console.error).toHaveBeenCalledWith(
+      "[ERROR] analytics_track_failed",
+    );
+  });
+
   it("reports a refused event and rejects anything but a boolean", async () => {
     await expect(
       storeWith(false).store.recordClientEvent(row, budget),

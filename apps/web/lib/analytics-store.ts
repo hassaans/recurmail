@@ -77,19 +77,30 @@ export function attributionFrom(
   };
 }
 
-/** Service-role PostgREST access to the analytics tables; nothing here runs as the user. */
+/**
+ * Service-role PostgREST access to the analytics tables; nothing here runs as
+ * the user. Route handlers await these writes after the real work is done, so
+ * each call is cut off after `timeoutMs` (the admin summary after
+ * `summaryTimeoutMs`): a slow or stuck database can lose an event but cannot
+ * hold up a response.
+ */
 export function createAnalyticsStore(config: {
   url: string;
   secretKey: string;
   fetcher?: typeof fetch;
+  timeoutMs?: number;
+  summaryTimeoutMs?: number;
 }): AnalyticsStore {
   const fetcher = config.fetcher ?? fetch;
+  const timeoutMs = config.timeoutMs ?? 2000;
+  const summaryTimeoutMs = config.summaryTimeoutMs ?? 10_000;
   async function request(
     path: string,
     params: Record<string, string>,
     method: "GET" | "POST",
     operation: string,
     body?: unknown,
+    timeout = timeoutMs,
   ): Promise<Response> {
     const url = new URL(`/rest/v1/${path}`, config.url);
     url.search = new URLSearchParams(params).toString();
@@ -104,6 +115,7 @@ export function createAnalyticsStore(config: {
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
       cache: "no-store",
+      signal: AbortSignal.timeout(timeout),
     });
     if (!response.ok) throw new AnalyticsStorageError(operation);
     return response;
@@ -152,6 +164,7 @@ export function createAnalyticsStore(config: {
         "POST",
         "get_analytics_summary",
         { p_days: days },
+        summaryTimeoutMs,
       );
       return response.json();
     },

@@ -60,6 +60,41 @@ export const CLIENT_EVENT_BUDGET: ClientEventBudget = {
   maxBrowsers: 30,
 };
 
+/**
+ * The request body as text, or null once it passes `limit` bytes. A declared
+ * Content-Length over the limit is refused before reading; otherwise the
+ * stream is read only as far as the limit, so an oversized or unbounded
+ * body never sits in memory whole.
+ */
+export async function readLimitedText(
+  request: Request,
+  limit: number,
+): Promise<string | null> {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > limit) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 /** The client address Vercel forwards: the first x-forwarded-for entry, else x-real-ip. */
 function clientAddress(request: Request): string | null {
   const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0];
@@ -217,13 +252,13 @@ export function createEventsHandler(config: {
       });
     if (!sameOrigin(request, config.origin))
       return reject(403, "Request origin is not allowed");
-    let text: string;
+    let text: string | null;
     try {
-      text = await request.text();
+      text = await readLimitedText(request, MAX_BODY);
     } catch {
       return reject(400, "Event body is required");
     }
-    if (text.length > MAX_BODY) return reject(413, "Event body is too large");
+    if (text === null) return reject(413, "Event body is too large");
     let value: unknown;
     try {
       value = JSON.parse(text);

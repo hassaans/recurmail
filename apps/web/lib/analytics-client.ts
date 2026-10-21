@@ -146,8 +146,23 @@ export function landingFrom(
 // the same page (after half an hour idle).
 let pageLanding: Landing = { source: "direct", referrer_host: null };
 
+// This page load's session, for a browser that blocks session storage.
+let pageSession: Session | null = null;
+
+/**
+ * The current session, renewed on use. Session storage is the record;
+ * without it the session this page already used, then the rm_sid cookie
+ * (which lapses after the same 30 idle minutes), carry the id. A session
+ * picked up from the cookie alone takes this page's landing as its source.
+ */
 function session(now: number, landing: Landing | null): Session {
-  const saved = read("sessionStorage", SESSION_KEY) as Session | null;
+  const fromCookie = cookie(SESSION_ID_COOKIE);
+  const saved =
+    (read("sessionStorage", SESSION_KEY) as Session | null) ??
+    pageSession ??
+    (fromCookie && UUID.test(fromCookie)
+      ? { ...pageLanding, id: fromCookie, last: now }
+      : null);
   const current =
     saved &&
     typeof saved.id === "string" &&
@@ -159,6 +174,7 @@ function session(now: number, landing: Landing | null): Session {
     !(landing && landing.source !== "direct")
       ? { ...saved, last: now }
       : { ...(landing ?? pageLanding), id: uuid(), last: now };
+  pageSession = current;
   write("sessionStorage", SESSION_KEY, current);
   setCookie(SESSION_ID_COOKIE, current.id, SESSION_IDLE / 1000);
   return current;
